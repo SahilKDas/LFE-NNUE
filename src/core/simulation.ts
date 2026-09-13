@@ -1,8 +1,8 @@
 import { CLIMATE_FEATURE_OFFSET, DEFAULT_SENSOR_RADIUS, DEFAULT_SENSE_CHANNELS, FEATURE_CATEGORIES, MAX_SENSOR_RADIUS, Nnue, POSITION_COUNT, SenseChannel, STATE_FEATURE_OFFSET, clampPerception, type BrainSeed } from "./nnue";
 import { climateAt, thermalStressDelta, type ClimateSample } from "./climate";
 import { CellType, DIRECTIONS, ResourceType, TerrainType, type LocalCell, type Metrics } from "./types";
-import { generateWorld, terrainPassable, type WorldLayers } from "./world";
-import { ARMOR_DURABILITY, ATTACK_COST, constructionMinerals, KILLER_DURABILITY, predatorGain } from "./ecology";
+import { generateWorld, terrainPassable, terrainProductivity } from "./world";
+import { ARMOR_DURABILITY, ATTACK_COST, climateMetabolicCost, constructionMinerals, KILLER_DURABILITY, predatorGain } from "./ecology";
 
 const enum Direction { Up, Down, Left, Right }
 const ENERGY_SCALE=1000, START_ENERGY=12*ENERGY_SCALE, PLANT_ENERGY=4*ENERGY_SCALE, CARRION_ENERGY=3*ENERGY_SCALE;
@@ -345,6 +345,8 @@ export class Simulation {
     organism.lifetime++;
     organism.energy-=organism.cells.length*CELL_BASE_COST;
     const localClimate = climateAt(organism.y, this.height, this.ticks);
+    const homeIndex=this.safeIndex(organism.x,organism.y),homeTerrain=homeIndex>=0?this.terrain[homeIndex] as TerrainType:TerrainType.Mountain;
+    organism.energy=Math.max(0,organism.energy-climateMetabolicCost(localClimate.temperature,homeTerrain===TerrainType.Desert));
     organism.thermalStress = Math.max(0, organism.thermalStress + thermalStressDelta(localClimate.temperature));
     if (organism.thermalStress >= 1) { organism.thermalStress -= 1; this.harm(organism); if (!organism.living) return; }
     if (organism.lifetime > organism.cells.length * this.lifespan) {
@@ -469,7 +471,8 @@ export class Simulation {
   }
 
   private produce(organism: Organism, x: number, y: number): void {
-    if ((organism.isMover && !this.moversCanProduce) || organism.energy<PRODUCE_COST || Math.random() >= this.foodChance * climateAt(y, this.height, this.ticks).fertility) return;
+    const origin=this.safeIndex(x,y),biome=origin>=0?this.terrain[origin] as TerrainType:TerrainType.Water;
+    if ((organism.isMover && !this.moversCanProduce) || organism.energy<PRODUCE_COST || Math.random() >= this.foodChance * climateAt(y, this.height, this.ticks).fertility*terrainProductivity(biome)) return;
     const [dx, dy] = DIRECTIONS[Math.floor(Math.random() * 4)]!;
     const index = this.safeIndex(x + dx, y + dy);
     if(index>=0&&terrainPassable(this.terrain[index] as TerrainType)){organism.energy-=PRODUCE_COST;this.resources[index]=ResourceType.Plant;this.resourceAmount[index]=Math.min(65535,this.resourceAmount[index]!+50);this.markDirty(index);}
