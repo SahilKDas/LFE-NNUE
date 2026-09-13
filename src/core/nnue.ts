@@ -3,9 +3,14 @@ export const FEATURE_CATEGORIES = 11;
 export const HIDDEN_SIZE = 16;
 export const OUTPUT_SIZE = 5;
 export const POSITION_COUNT = 24;
-export const INPUT_SIZE = POSITION_COUNT * FEATURE_CATEGORIES + 8;
+export const LEGACY_INPUT_SIZE = POSITION_COUNT * FEATURE_CATEGORIES + 8;
+export const CLIMATE_FEATURE_OFFSET = LEGACY_INPUT_SIZE;
+export const CLIMATE_FEATURE_COUNT = 12;
+export const INPUT_SIZE = LEGACY_INPUT_SIZE + CLIMATE_FEATURE_COUNT;
+export const BRAIN_SCHEMA_VERSION = 2;
 
 export interface BrainSeed {
+  schemaVersion?: number;
   inputWeights: number[][];
   hiddenBias: number[];
   outputWeights: number[][];
@@ -20,12 +25,17 @@ export class Nnue {
   readonly outputWeights: Float32Array[];
   readonly outputBias: Float32Array;
   private accumulator: Float32Array;
-  private active = new Set<number>();
+  private output = new Float32Array(OUTPUT_SIZE);
+  private active: number[] = [];
+  private featureMarks = new Uint32Array(INPUT_SIZE);
+  private activeFlags = new Uint8Array(INPUT_SIZE);
+  private markGeneration = 0;
 
   constructor(seed?: BrainSeed, random = Math.random) {
+    if (seed) validateSeed(seed);
     this.inputWeights = seed
-      ? seed.inputWeights.map((row) => Float32Array.from(row))
-      : Array.from({ length: INPUT_SIZE }, () => Float32Array.from({ length: HIDDEN_SIZE }, () => randomWeight(0.12, random)));
+      ? Array.from({ length: INPUT_SIZE }, (_, index) => Float32Array.from(seed.inputWeights[index] ?? new Float32Array(HIDDEN_SIZE)))
+      : Array.from({ length: INPUT_SIZE }, (_, index) => Float32Array.from({ length: HIDDEN_SIZE }, () => index < CLIMATE_FEATURE_OFFSET ? randomWeight(0.12, random) : 0));
     this.hiddenBias = seed ? Float32Array.from(seed.hiddenBias) : Float32Array.from({ length: HIDDEN_SIZE }, () => randomWeight(0.05, random));
     this.outputWeights = seed
       ? seed.outputWeights.map((row) => Float32Array.from(row))
@@ -40,6 +50,7 @@ export class Nnue {
 
   toSeed(): BrainSeed {
     return {
+      schemaVersion: BRAIN_SCHEMA_VERSION,
       inputWeights: this.inputWeights.map((row) => Array.from(row)),
       hiddenBias: Array.from(this.hiddenBias),
       outputWeights: this.outputWeights.map((row) => Array.from(row)),
@@ -48,19 +59,22 @@ export class Nnue {
   }
 
   evaluate(features: readonly number[]): Float32Array {
-    const next = new Set(features);
-    for (const feature of this.active) if (!next.has(feature)) this.apply(feature, -1);
-    for (const feature of next) if (!this.active.has(feature)) this.apply(feature, 1);
-    this.active = next;
+    this.markGeneration++;
+    if (this.markGeneration === 0xffffffff) { this.featureMarks.fill(0); this.markGeneration = 1; }
+    const mark = this.markGeneration;
+    for (let index=0; index<features.length; index++) { const feature=features[index]!; if (feature>=0&&feature<INPUT_SIZE) this.featureMarks[feature]=mark; }
+    for (let index=0; index<this.active.length; index++) { const feature=this.active[index]!; if (this.featureMarks[feature]!==mark) { this.apply(feature,-1); this.activeFlags[feature]=0; } }
+    for (let index=0; index<features.length; index++) { const feature=features[index]!; if (feature>=0&&feature<INPUT_SIZE && this.activeFlags[feature]===0) { this.apply(feature,1); this.activeFlags[feature]=1; } }
+    this.active = Array.from(features);
 
-    return Float32Array.from({ length: OUTPUT_SIZE }, (_, output) => {
-      let value = this.outputBias[output] ?? 0;
-      const row = this.outputWeights[output]!;
+    for (let output=0; output<OUTPUT_SIZE; output++) {
+      let value = this.outputBias[output] ?? 0; const row = this.outputWeights[output]!;
       for (let hidden = 0; hidden < HIDDEN_SIZE; hidden++) {
         value += Math.max(0, this.accumulator[hidden] ?? 0) * (row[hidden] ?? 0);
       }
-      return value;
-    });
+      this.output[output]=value;
+    }
+    return this.output;
   }
 
   action(features: readonly number[]): number {
@@ -126,7 +140,15 @@ export class Nnue {
   }
 
   private reset(): void {
-    this.active.clear();
+    this.active = [];
+    this.activeFlags.fill(0);
     this.accumulator = new Float32Array(this.hiddenBias);
   }
+}
+
+function validateSeed(seed: BrainSeed): void {
+  const rows = seed.inputWeights.length;
+  if (rows !== LEGACY_INPUT_SIZE && rows !== INPUT_SIZE) throw new Error("Invalid brain input row count: " + rows);
+  if (seed.hiddenBias.length !== HIDDEN_SIZE || seed.outputBias.length !== OUTPUT_SIZE || seed.outputWeights.length !== OUTPUT_SIZE) throw new Error("Invalid brain hidden/output dimensions");
+  if (seed.inputWeights.some((row) => row.length !== HIDDEN_SIZE) || seed.outputWeights.some((row) => row.length !== HIDDEN_SIZE)) throw new Error("Invalid brain row width");
 }

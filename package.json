@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "train": "tsx scripts/train.ts",
+    "benchmark": "tsx scripts/benchmark.ts",
     "verify": "npm run test && npm run train && npm run build"
   },
   "devDependencies": {

@@ -1,241 +1,37 @@
 import "./style.css";
-import { Simulation } from "./core/simulation";
-import { CELL_COLORS, CellType } from "./core/types";
+import { climateAt } from "./core/climate";
 import type { BrainSeed } from "./core/nnue";
+import type { WorkerCommand, WorkerResponse } from "./core/protocol";
+import type { OrganismInspection } from "./core/simulation";
+import { CELL_COLORS, CellType, type Metrics } from "./core/types";
 
-const app = document.querySelector<HTMLDivElement>("#app");
-if (!app) throw new Error("Missing app root");
+const app = document.querySelector<HTMLDivElement>("#app"); if (!app) throw new Error("Missing app root");
+app.innerHTML = `<main class="shell"><header><div><span class="eyebrow">EVOLUTION, ACCELERATED</span><h1>Life Engine <em>NNUE</em></h1></div><div class="status"><i></i><span id="run-state">Running</span></div></header><section class="stage"><canvas id="world"></canvas><div class="legend"><span><b class="food"></b>Food</span><span><b class="mouth"></b>Mouth</span><span><b class="producer"></b>Producer</span><span><b class="mover"></b>Mover</span><span><b class="killer"></b>Killer</span><span><b class="armor"></b>Armor</span></div></section><aside><section class="panel hero-panel"><p class="label">CORE</p><h2>Sparse speed.<br><span>Neural instinct.</span></h2><p>A 1024×640 ecosystem evolves climate-aware NNUE brains in a dedicated worker.</p></section><section class="metrics"><article><span>ORGANISMS</span><strong id="organisms">0</strong></article><article><span>RECORD</span><strong id="record">0</strong></article><article><span>SEASON</span><strong id="season">Spring</strong></article><article><span>LARGEST</span><strong id="largest">0</strong></article></section><section class="panel controls"><div class="control-title"><h3>Simulation</h3><button id="toggle">Pause</button></div><label>Simulation TPS <output id="speed-value">30</output><input id="speed" type="range" min="1" max="120" value="30"></label><label>Food production <output id="food-value">4%</output><input id="food-rate" type="range" min="0" max="20" value="4"></label><div class="button-grid"><button id="reset">Reset world</button><button id="seed">Seed food</button></div><label class="overlay-toggle"><input id="climate-overlay" type="checkbox"> Temperature / fertility overlay</label></section><section class="panel tools"><h3>World tools</h3><div class="tool-row"><button class="tool active" data-tool="inspect">Inspect</button><button class="tool" data-tool="pan">Pan</button><button class="tool" data-tool="1">Food</button><button class="tool" data-tool="2">Wall</button><button class="tool" data-tool="0">Erase</button></div><p>Wheel to zoom. Use Pan or the middle mouse button to move around.</p></section><section class="panel observatory"><div class="control-title"><h3>Evolution Observatory</h3><button id="clear-selection">Clear</button></div><div id="observation" class="observation-empty">Choose Inspect, then select a creature.</div></section><footer><span>TypeScript Web Worker</span><span id="ticks">0 ticks</span></footer></aside></main>`;
 
-app.innerHTML = `
-  <main class="shell">
-    <header>
-      <div><span class="eyebrow">EVOLUTION, ACCELERATED</span><h1>Life Engine <em>NNUE</em></h1></div>
-      <div class="status"><i></i><span id="run-state">Running</span></div>
-    </header>
-    <section class="stage">
-      <canvas id="world" aria-label="Life Engine simulation"></canvas>
-      <div class="legend">
-        <span><b class="food"></b>Food</span><span><b class="mouth"></b>Mouth</span>
-        <span><b class="producer"></b>Producer</span><span><b class="mover"></b>Mover</span>
-        <span><b class="killer"></b>Killer</span><span><b class="armor"></b>Armor</span>
-      </div>
-    </section>
-    <aside>
-      <section class="panel hero-panel">
-        <p class="label">CORE</p><h2>Sparse speed.<br><span>Neural instinct.</span></h2>
-        <p>Sparse NNUE brains inherit, mutate, and learn movement strategies under natural selection.</p>
-      </section>
-      <section class="metrics">
-        <article><span>ORGANISMS</span><strong id="organisms">0</strong></article>
-        <article><span>RECORD</span><strong id="record">0</strong></article>
-        <article><span>GENERATION</span><strong id="generation">0</strong></article>
-        <article><span>LARGEST</span><strong id="largest">0</strong></article>
-      </section>
-      <section class="panel controls">
-        <div class="control-title"><h3>Simulation</h3><button id="toggle">Pause</button></div>
-        <label>Ticks per frame <output id="speed-value">2</output><input id="speed" type="range" min="1" max="40" value="2"></label>
-        <label>Food production <output id="food-value">4%</output><input id="food-rate" type="range" min="0" max="20" value="4"></label>
-        <div class="button-grid"><button id="reset">Reset world</button><button id="seed">Seed food</button></div>
-      </section>
-      <section class="panel tools">
-        <h3>World tools</h3>
-        <div class="tool-row">
-          <button class="tool active" data-tool="inspect">Inspect</button>
-          <button class="tool" data-tool="1">Food</button>
-          <button class="tool" data-tool="2">Wall</button>
-          <button class="tool" data-tool="0">Erase</button>
-        </div>
-        <p>Paint directly on the ecosystem. Painting over an organism removes it.</p>
-      </section>
-      <section class="panel observatory">
-        <div class="control-title"><h3>Evolution Observatory</h3><button id="clear-selection">Clear</button></div>
-        <div id="observation" class="observation-empty">Choose Inspect, then select a creature.</div>
-      </section>
-      <footer><span id="core-state">TypeScript NNUE</span><span id="ticks">0 ticks</span></footer>
-    </aside>
-  </main>`;
+const WORLD_WIDTH=1024, WORLD_HEIGHT=640;
+const canvas=document.querySelector<HTMLCanvasElement>("#world")!, context=canvas.getContext("2d",{alpha:false})!;
+const pixels=document.createElement("canvas"); pixels.width=WORLD_WIDTH; pixels.height=WORLD_HEIGHT;
+const pixelContext=pixels.getContext("2d",{alpha:false})!, image=pixelContext.createImageData(WORLD_WIDTH,WORLD_HEIGHT);
+let cells:Uint8Array<ArrayBufferLike>=new Uint8Array(WORLD_WIDTH*WORLD_HEIGHT), owners:Int32Array<ArrayBufferLike>=new Int32Array(WORLD_WIDTH*WORLD_HEIGHT); owners.fill(-1);
+let zoom=2, cameraX=0, cameraY=0, running=true, tool:CellType|"inspect"|"pan"="inspect", selectedId:number|undefined, inspection:OrganismInspection|undefined, metrics:Metrics|undefined, overlay=false, dragging=false, dragX=0, dragY=0;
+const worker=new Worker(new URL("./simulation.worker.ts",import.meta.url),{type:"module"});
+const send=(command:WorkerCommand)=>worker.postMessage(command);
+const rgb=new Map(Object.entries(CELL_COLORS).map(([key,color])=>{ const probe=document.createElement("canvas").getContext("2d")!; probe.fillStyle=color; probe.fillRect(0,0,1,1); return [Number(key),Array.from(probe.getImageData(0,0,1,1).data.slice(0,3))]; }));
+function updatePixel(index:number):void { const color=rgb.get(cells[index]!)??[0,0,0]; const offset=index*4; image.data[offset]=color[0]!; image.data[offset+1]=color[1]!; image.data[offset+2]=color[2]!; image.data[offset+3]=255; }
+function refreshPixels(indices?:Uint32Array):void { if(indices) for(const index of indices) updatePixel(index); else for(let index=0;index<cells.length;index++) updatePixel(index); pixelContext.putImageData(image,0,0); }
+worker.onmessage=({data}:MessageEvent<WorkerResponse>)=>{ if(data.type==="full-snapshot"){cells=data.cells;owners=data.owners;refreshPixels();} else if(data.type==="cell-delta"){data.indices.forEach((index,i)=>{cells[index]=data.cells[i]!;owners[index]=data.owners[i]!;});refreshPixels(data.indices);} else if(data.type==="metrics"){metrics=data.metrics;renderMetrics();} else if(data.type==="selection"){selectedId=data.id;inspection=data.inspection;renderObservatory();} else if(data.type==="error") console.error(data.message); };
 
-const canvas = document.querySelector<HTMLCanvasElement>("#world")!;
-const context = canvas.getContext("2d", { alpha: false })!;
-const cellSize = 5;
-let seed: BrainSeed | undefined;
-try {
-  const response = await fetch("/trained-brain.json");
-  if (response.ok) seed = await response.json() as BrainSeed;
-} catch { /* random initialization remains available */ }
+function resize():void { const box=canvas.getBoundingClientRect(),scale=devicePixelRatio||1;canvas.width=Math.floor(box.width*scale);canvas.height=Math.floor(box.height*scale);context.setTransform(scale,0,0,scale,0,0); }
+function render():void { context.fillStyle=CELL_COLORS[CellType.Empty];context.fillRect(0,0,canvas.clientWidth,canvas.clientHeight);context.imageSmoothingEnabled=false;context.drawImage(pixels,cameraX,cameraY,WORLD_WIDTH*zoom,WORLD_HEIGHT*zoom); if(overlay&&metrics){for(let y=0;y<WORLD_HEIGHT;y+=8){const c=climateAt(y,WORLD_HEIGHT,Math.round(metrics.seasonPhase*24000));context.fillStyle=`rgba(${Math.round(c.temperature*255)},${Math.round(c.fertility*70)},${Math.round((1-c.temperature)*255)},0.16)`;context.fillRect(cameraX,cameraY+y*zoom,WORLD_WIDTH*zoom,8*zoom);}} requestAnimationFrame(render); }
+function screenToWorld(event:PointerEvent):[number,number]{const box=canvas.getBoundingClientRect();return[Math.floor((event.clientX-box.left-cameraX)/zoom),Math.floor((event.clientY-box.top-cameraY)/zoom)];}
+function renderMetrics():void { if(!metrics)return; for(const key of ["organisms","record","largest"] as const) document.querySelector(`#${key}`)!.textContent=String(metrics[key]); document.querySelector("#season")!.textContent=metrics.season;document.querySelector("#ticks")!.textContent=`${metrics.ticks.toLocaleString()} ticks · ${(metrics.seasonPhase*100).toFixed(0)}%`; }
+const lineage=(items:{id:number;generation:number;alive:boolean}[])=>items.length?items.slice(-16).map(x=>`<button class="lineage-node ${x.alive?"alive":"dead"}" data-organism-id="${x.id}">#${x.id}<small>G${x.generation}</small></button>`).join(""):"<span class=\"muted\">None</span>";
+function renderObservatory():void {const root=document.querySelector<HTMLElement>("#observation")!;if(!inspection){root.className="observation-empty";root.textContent="Choose Inspect, then select a creature.";return;}const o=inspection,actions=["Up","Down","Left","Right","Wait"],max=Math.max(...(o.outputs??[0])),exps=(o.outputs??[]).map(v=>Math.exp(v-max)),total=exps.reduce((a,b)=>a+b,0);root.className="";root.innerHTML=`<div class="organism-heading"><div><span class="label">CREATURE</span><strong>#${o.id}</strong></div><span class="life-badge ${o.alive?"alive":"dead"}">${o.alive?"Alive":"Dead"}</span></div><div class="inspection-stats"><span>Generation<strong>${o.generation}</strong></span><span>Age<strong>${o.age}</strong></span><span>Cells<strong>${o.cells}</strong></span><span>Food<strong>${o.food}</strong></span><span>Damage<strong>${o.damage}</strong></span><span>Stress<strong>${(o.thermalStress*100).toFixed(1)}%</strong></span></div><h4>Local climate</h4><div class="rates"><span>${o.season} <b>${(o.seasonPhase*100).toFixed(1)}%</b></span><span>Temperature <b>${(o.temperature*100).toFixed(0)}%</b></span><span>Fertility <b>${o.fertility.toFixed(2)}×</b></span></div><h4>Ancestry</h4><div class="lineage-list">${lineage(o.ancestors)}</div><h4>Descendants <small>${o.totalDescendants} total</small></h4><div class="lineage-list">${lineage(o.descendants)}</div><h4>Mutations</h4><ul class="mutation-list">${o.mutations.length?o.mutations.map(m=>`<li>${m}</li>`).join(""):"<li class=\"muted\">No mutations from parent</li>"}</ul><h4>Current sensory inputs</h4><p>${o.senses.map(s=>s.label).join(" · ")||"Static organism"}</p><h4>Neural outputs ${o.action?`<small>→ ${o.action}</small>`:""}</h4><div class="output-list">${exps.map((v,i)=>`<div class="${actions[i]===o.action?"chosen":""}"><span>${actions[i]}</span><i><b style="width:${v/total*100}%"></b></i><output>${(v/total*100).toFixed(1)}%</output></div>`).join("")}</div>`;}
 
-let simulation: Simulation;
-let running = true;
-let ticksPerFrame = 2;
-let tool: CellType | "inspect" = "inspect";
-let selectedId: number | undefined;
-
-function resize(): void {
-  const bounds = canvas.getBoundingClientRect();
-  const scale = window.devicePixelRatio || 1;
-  canvas.width = Math.floor(bounds.width * scale);
-  canvas.height = Math.floor(bounds.height * scale);
-  context.setTransform(scale, 0, 0, scale, 0, 0);
-  simulation = new Simulation({
-    width: Math.max(40, Math.floor(bounds.width / cellSize)),
-    height: Math.max(40, Math.floor(bounds.height / cellSize)),
-    foodChance: 0.04,
-    lifespan: 120,
-  }, seed);
-}
-
-function render(): void {
-  const width = simulation.width;
-  context.fillStyle = CELL_COLORS[CellType.Empty];
-  context.fillRect(0, 0, canvas.clientWidth, canvas.clientHeight);
-  for (let index = 0; index < simulation.cells.length; index++) {
-    const type = simulation.cells[index] as CellType;
-    if (type === CellType.Empty) continue;
-    context.fillStyle = CELL_COLORS[type];
-    context.fillRect((index % width) * cellSize, Math.floor(index / width) * cellSize, cellSize, cellSize);
-    if (simulation.owners[index] === selectedId) {
-      context.strokeStyle = "#ffe45e";
-      context.lineWidth = 1;
-      context.strokeRect((index % width) * cellSize + 0.5, Math.floor(index / width) * cellSize + 0.5, cellSize - 1, cellSize - 1);
-    }
-  }
-}
-
-function softmax(values: readonly number[]): number[] {
-  const maximum = Math.max(...values);
-  const exponential = values.map((value) => Math.exp(value - maximum));
-  const total = exponential.reduce((sum, value) => sum + value, 0);
-  return exponential.map((value) => value / total);
-}
-
-function lineageButtons(items: { id: number; generation: number; alive: boolean }[]): string {
-  if (!items.length) return '<span class="muted">None</span>';
-  const visible = items.slice(-16);
-  const hidden = items.length - visible.length;
-  return `${hidden > 0 ? `<span class="muted">+${hidden} earlier</span>` : ""}${visible.map((item) =>
-    `<button class="lineage-node ${item.alive ? "alive" : "dead"}" data-organism-id="${item.id}">#${item.id}<small>G${item.generation}</small></button>`
-  ).join("")}`;
-}
-
-function sensoryGrid(senses: { x: number; y: number; category: number; label: string }[]): string {
-  const byPosition = new Map(senses.map((sense) => [`${sense.x},${sense.y}`, sense]));
-  let html = "";
-  for (let y = -2; y <= 2; y++) for (let x = -2; x <= 2; x++) {
-    if (x === 0 && y === 0) {
-      html += '<span class="sense center" title="Selected organism">◎</span>';
-    } else {
-      const sense = byPosition.get(`${x},${y}`);
-      html += `<span class="sense sense-${sense?.category ?? 0}" title="${sense?.label ?? "Unknown"}"></span>`;
-    }
-  }
-  return html;
-}
-
-function renderObservatory(): void {
-  const root = document.querySelector<HTMLElement>("#observation")!;
-  if (selectedId === undefined) {
-    root.className = "observation-empty";
-    root.textContent = "Choose Inspect, then select a creature.";
-    return;
-  }
-  const organism = simulation.inspect(selectedId);
-  if (!organism) {
-    selectedId = undefined;
-    root.className = "observation-empty";
-    root.textContent = "That lineage is no longer part of this world.";
-    return;
-  }
-  root.className = "";
-  const probabilities = organism.outputs ? softmax(organism.outputs) : [];
-  const actions = ["Up", "Down", "Left", "Right", "Wait"];
-  root.innerHTML = `
-    <div class="organism-heading">
-      <div><span class="label">CREATURE</span><strong>#${organism.id}</strong></div>
-      <span class="life-badge ${organism.alive ? "alive" : "dead"}">${organism.alive ? "Alive" : "Dead"}</span>
-    </div>
-    <div class="inspection-stats">
-      <span>Generation<strong>${organism.generation}</strong></span>
-      <span>Age<strong>${organism.age}</strong></span>
-      <span>Cells<strong>${organism.cells}</strong></span>
-      <span>Food<strong>${organism.food}</strong></span>
-      <span>Damage<strong>${organism.damage}</strong></span>
-      <span>Brain<strong>${organism.isMover ? "NNUE" : "Static"}</strong></span>
-    </div>
-    <h4>Ancestry</h4><div class="lineage-list">${lineageButtons(organism.ancestors)}</div>
-    <h4>Descendants <small>${organism.descendants.length}</small></h4><div class="lineage-list">${lineageButtons(organism.descendants)}</div>
-    <h4>Mutations</h4>
-    <ul class="mutation-list">${organism.mutations.length
-      ? organism.mutations.map((mutation) => `<li>${mutation}</li>`).join("")
-      : "<li class=\"muted\">No mutations from parent</li>"}</ul>
-    <div class="rates"><span>Body mutation <b>${organism.mutability.toFixed(1)}%</b></span><span>Neural mutation <b>${organism.neuralMutability.toFixed(1)}%</b></span></div>
-    <h4>Current sensory inputs</h4>
-    ${organism.senses.length ? `<div class="sensory-row"><div class="sense-grid">${sensoryGrid(organism.senses)}</div><p>Hover cells to inspect the encoded feature.</p></div>` : '<p class="muted">Static organisms have no neural inputs.</p>'}
-    <h4>Neural outputs ${organism.action ? `<small>→ ${organism.action}</small>` : ""}</h4>
-    <div class="output-list">${probabilities.length ? probabilities.map((value, index) =>
-      `<div class="${actions[index] === organism.action ? "chosen" : ""}"><span>${actions[index]}</span><i><b style="width:${(value * 100).toFixed(1)}%"></b></i><output>${(value * 100).toFixed(1)}%</output></div>`
-    ).join("") : '<p class="muted">No NNUE outputs for this organism.</p>'}</div>`;
-}
-
-let lastObservationRender = 0;
-function frame(time = 0): void {
-  if (running) simulation.step(ticksPerFrame);
-  render();
-  const metrics = simulation.metrics();
-  for (const key of ["organisms", "record", "generation", "largest"] as const) {
-    document.querySelector<HTMLElement>(`#${key}`)!.textContent = String(metrics[key]);
-  }
-  document.querySelector("#ticks")!.textContent = `${metrics.ticks.toLocaleString()} ticks`;
-  if (time - lastObservationRender > 150) {
-    renderObservatory();
-    lastObservationRender = time;
-  }
-  requestAnimationFrame(frame);
-}
-
-document.querySelector("#toggle")!.addEventListener("click", (event) => {
-  running = !running;
-  (event.currentTarget as HTMLButtonElement).textContent = running ? "Pause" : "Resume";
-  document.querySelector("#run-state")!.textContent = running ? "Running" : "Paused";
-  document.body.classList.toggle("paused", !running);
-});
-document.querySelector("#reset")!.addEventListener("click", () => {
-  simulation.reset();
-  selectedId = undefined;
-});
-document.querySelector("#seed")!.addEventListener("click", () => {
-  for (let i = 0; i < 500; i++) simulation.paint(
-    Math.floor(Math.random() * simulation.width),
-    Math.floor(Math.random() * simulation.height),
-    CellType.Food,
-  );
-});
-document.querySelector<HTMLInputElement>("#speed")!.addEventListener("input", (event) => {
-  ticksPerFrame = Number((event.target as HTMLInputElement).value);
-  document.querySelector("#speed-value")!.textContent = String(ticksPerFrame);
-});
-document.querySelector<HTMLInputElement>("#food-rate")!.addEventListener("input", (event) => {
-  const value = Number((event.target as HTMLInputElement).value);
-  simulation.foodChance = value / 100;
-  document.querySelector("#food-value")!.textContent = `${value}%`;
-});
-document.querySelectorAll<HTMLButtonElement>(".tool").forEach((button) => button.addEventListener("click", () => {
-  document.querySelector(".tool.active")?.classList.remove("active");
-  button.classList.add("active");
-  tool = button.dataset.tool === "inspect" ? "inspect" : Number(button.dataset.tool) as CellType;
-}));
-canvas.addEventListener("pointerdown", (event) => {
-  const bounds = canvas.getBoundingClientRect();
-  const x = Math.floor((event.clientX - bounds.left) / cellSize);
-  const y = Math.floor((event.clientY - bounds.top) / cellSize);
-  if (tool === "inspect") selectedId = simulation.organismIdAt(x, y);
-  else simulation.paint(x, y, tool);
-});
-document.querySelector("#clear-selection")!.addEventListener("click", () => { selectedId = undefined; });
-document.querySelector("#observation")!.addEventListener("pointerdown", (event) => {
-  const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-organism-id]");
-  if (button) selectedId = Number(button.dataset.organismId);
-});
-
-window.addEventListener("resize", resize);
-resize();
-frame();
+document.querySelector("#toggle")!.addEventListener("click",e=>{running=!running;send({type:"step-control",running});(e.currentTarget as HTMLButtonElement).textContent=running?"Pause":"Resume";document.querySelector("#run-state")!.textContent=running?"Running":"Paused";});
+document.querySelector("#reset")!.addEventListener("click",()=>send({type:"reset"}));document.querySelector("#seed")!.addEventListener("click",()=>{for(let i=0;i<500;i++)send({type:"paint",x:Math.floor(Math.random()*WORLD_WIDTH),y:Math.floor(Math.random()*WORLD_HEIGHT),cellType:CellType.Food});});
+document.querySelector<HTMLInputElement>("#speed")!.addEventListener("input",e=>{const value=Number((e.target as HTMLInputElement).value);document.querySelector("#speed-value")!.textContent=String(value);send({type:"step-control",running,ticksPerSecond:value});});document.querySelector<HTMLInputElement>("#food-rate")!.addEventListener("input",e=>{const value=Number((e.target as HTMLInputElement).value);document.querySelector("#food-value")!.textContent=`${value}%`;send({type:"settings",foodChance:value/100});});document.querySelector<HTMLInputElement>("#climate-overlay")!.addEventListener("change",e=>overlay=(e.target as HTMLInputElement).checked);
+document.querySelectorAll<HTMLButtonElement>(".tool").forEach(button=>button.addEventListener("click",()=>{document.querySelector(".tool.active")?.classList.remove("active");button.classList.add("active");tool=button.dataset.tool==="inspect"||button.dataset.tool==="pan"?button.dataset.tool:Number(button.dataset.tool) as CellType;}));
+canvas.addEventListener("pointerdown",e=>{if(tool==="pan"||e.button===1){dragging=true;dragX=e.clientX-cameraX;dragY=e.clientY-cameraY;canvas.setPointerCapture(e.pointerId);return;}const[x,y]=screenToWorld(e);if(tool==="inspect")send({type:"select",x,y});else send({type:"paint",x,y,cellType:tool});});canvas.addEventListener("pointermove",e=>{if(dragging){cameraX=e.clientX-dragX;cameraY=e.clientY-dragY;}});canvas.addEventListener("pointerup",()=>dragging=false);canvas.addEventListener("wheel",e=>{e.preventDefault();const box=canvas.getBoundingClientRect(),wx=(e.clientX-box.left-cameraX)/zoom,wy=(e.clientY-box.top-cameraY)/zoom;zoom=Math.max(.5,Math.min(16,zoom*(e.deltaY<0?1.2:1/1.2)));cameraX=e.clientX-box.left-wx*zoom;cameraY=e.clientY-box.top-wy*zoom;},{passive:false});
+document.querySelector("#clear-selection")!.addEventListener("click",()=>{selectedId=undefined;inspection=undefined;renderObservatory();});document.querySelector("#observation")!.addEventListener("pointerdown",e=>{const button=(e.target as HTMLElement).closest<HTMLButtonElement>("[data-organism-id]");if(button)send({type:"inspect",id:Number(button.dataset.organismId)});});
+let seed:BrainSeed|undefined;try{const response=await fetch("/trained-brain.json");if(response.ok)seed=await response.json() as BrainSeed;}catch{}send({type:"initialize",seed,width:WORLD_WIDTH,height:WORLD_HEIGHT});window.addEventListener("resize",resize);resize();render();

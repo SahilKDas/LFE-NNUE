@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { Nnue, POSITION_COUNT } from "../src/core/nnue";
+import { CLIMATE_FEATURE_OFFSET, Nnue, POSITION_COUNT } from "../src/core/nnue";
 
 function mulberry32(seed: number): () => number {
   return () => {
@@ -103,6 +103,7 @@ if (foodCorrect < 20 || escapeCorrect < 20 || mixedCorrect < 20 || flockCorrect 
 }
 
 const output = resolve("public/trained-brain.json");
+for (let row = CLIMATE_FEATURE_OFFSET; row < brain.inputWeights.length; row++) brain.inputWeights[row]!.fill(0);
 await mkdir(dirname(output), { recursive: true });
 await writeFile(output, JSON.stringify(brain.toSeed()));
 console.log(`trained policy: food ${foodCorrect}/24, killer avoidance ${escapeCorrect}/24, mixed-scene avoidance ${mixedCorrect}/24, flocking ${flockCorrect}/96`);

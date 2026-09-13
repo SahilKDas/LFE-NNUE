@@ -22,6 +22,11 @@ export interface Metrics {
   ticks: number;
   largest: number;
   averageMutation: number;
+  season: string;
+  seasonPhase: number;
+  temperature: number;
+  fertility: number;
+  averageStress: number;
 }
 
 export const DIRECTIONS = [[0, -1], [0, 1], [-1, 0], [1, 0]] as const;
