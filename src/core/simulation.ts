@@ -142,7 +142,8 @@ export class Simulation {
   offspringRotate = true;
   instaKill = false;
   private organisms = new Map<number, Organism>();
-  private activeIds: number[] = [];
+  private active: Organism[] = [];
+  private deathsPending=false;
   private nextId = 1;
   private ticks = 0;
   private resets = 0;
@@ -174,7 +175,7 @@ export class Simulation {
     this.cells.fill(CellType.Empty);
     this.owners.fill(-1);
     this.organisms.clear();
-    this.activeIds = [];
+    this.active = []; this.deathsPending=false;
     this.lineage.clear();
     this.deadOrder = [];
     this.dirty.length = 0; this.dirtyFlags.fill(0);
@@ -194,11 +195,11 @@ export class Simulation {
   step(count = 1): void {
     for (let iteration = 0; iteration < count; iteration++) {
       this.ticks++;
-      const count = this.activeIds.length;
-      for (let index = 0; index < count; index++) { const organism = this.organisms.get(this.activeIds[index]!); if (organism) this.updateOrganism(organism); }
-      this.activeIds = this.activeIds.filter((id) => { const organism = this.organisms.get(id); if (organism?.living) return true; this.organisms.delete(id); return false; });
-      if (this.activeIds.length === 0) this.reset();
-      this.record = Math.max(this.record, this.activeIds.length);
+      const count = this.active.length;
+      for (let index=0;index<count;index++) this.updateOrganism(this.active[index]!);
+      if(this.deathsPending){this.active=this.active.filter(organism=>{if(organism.living)return true;this.organisms.delete(organism.id);return false;});this.deathsPending=false;}
+      if (this.active.length === 0) this.reset();
+      this.record = Math.max(this.record, this.active.length);
     }
   }
 
@@ -215,14 +216,14 @@ export class Simulation {
     for (const organism of this.organisms.values()) { mutation += organism.mutability; stress += organism.thermalStress; }
     const climate = climateAt(Math.floor(this.height / 2), this.height, this.ticks);
     return {
-      organisms: this.activeIds.length,
+      organisms: this.active.length,
       record: this.record,
       generation: this.resets,
       ticks: this.ticks,
       largest: this.largest,
-      averageMutation: this.activeIds.length ? mutation / this.activeIds.length : 0,
+      averageMutation: this.active.length ? mutation / this.active.length : 0,
       season: climate.season, seasonPhase: climate.phase, temperature: climate.temperature,
-      fertility: climate.fertility, averageStress: this.activeIds.length ? stress / this.activeIds.length : 0,
+      fertility: climate.fertility, averageStress: this.active.length ? stress / this.active.length : 0,
     };
   }
 
@@ -291,12 +292,13 @@ export class Simulation {
   select(id?: number): void { this.selectedId = id; }
   climateAt(y: number): ClimateSample { return climateAt(y, this.height, this.ticks); }
   populateBenchmark(count = 10_000): void {
-    this.cells.fill(CellType.Empty); this.owners.fill(-1); this.organisms.clear(); this.activeIds=[]; this.lineage.clear(); this.deadOrder=[]; this.dirty.length=0; this.dirtyFlags.fill(0);
+    this.cells.fill(CellType.Empty); this.owners.fill(-1); this.organisms.clear(); this.active=[]; this.lineage.clear(); this.deadOrder=[]; this.dirty.length=0; this.dirtyFlags.fill(0);
     const columns = Math.floor(Math.sqrt(count * this.width / this.height));
+    const sharedBrain=new Nnue(this.seed);
     for (let index=0; index<count; index++) {
       const x = 1 + Math.floor(index % columns) * Math.max(1, Math.floor((this.width-2)/columns));
       const y = 1 + Math.floor(index / columns) * Math.max(1, Math.floor((this.height-2)/Math.ceil(count/columns)));
-      const organism=this.createOrganism(Math.min(this.width-2,x),Math.min(this.height-2,y)); this.addCell(organism,CellType.Mover,0,0); this.addOrganism(organism);
+      const organism=this.createOrganism(Math.min(this.width-2,x),Math.min(this.height-2,y));organism.cells.push({type:CellType.Mover,x:0,y:0});organism.isMover=true;organism.brain=sharedBrain.clone();this.addOrganism(organism);
     }
   }
   consumeDelta(): CellDelta {
@@ -358,12 +360,8 @@ export class Simulation {
       else if (local.type === CellType.Killer) this.attack(organism, local, x, y);
     }
     if (!organism.living || !organism.isMover || !organism.brain) return;
-    organism.energy=Math.max(0,organism.energy-Math.ceil(organism.neuralCost/20));
-    const features = this.features(organism);
-    const outputs = organism.brain.evaluate(features);
-    const action = this.bestAction(outputs);
-    if (organism.id === this.selectedId) { organism.lastFeatures = features; organism.lastOutputs = Array.from(outputs); organism.lastAction = action; }
-    organism.direction = action as Direction;
+    const decisionInterval=Math.max(1,Math.min(16,Math.ceil(organism.neuralCost/16)));
+    if((this.ticks+organism.id)%decisionInterval===0){organism.energy=Math.max(0,organism.energy-Math.ceil(organism.neuralCost/20));const features=this.features(organism),outputs=organism.brain.evaluate(features),action=this.bestAction(outputs);if(organism.id===this.selectedId){organism.lastFeatures=features;organism.lastOutputs=Array.from(outputs);organism.lastAction=action;}organism.direction=action as Direction;}
     if (organism.direction >= 4) return;
     organism.moveCount++;
     organism.energy=Math.max(0,organism.energy-MOVE_COST);
@@ -575,7 +573,7 @@ export class Simulation {
   }
 
   private addOrganism(organism: Organism): void {
-    this.organisms.set(organism.id, organism); this.activeIds.push(organism.id);
+    this.organisms.set(organism.id, organism); this.active.push(organism);
     this.lineage.set(organism.id, {
       id: organism.id,
       parentId: organism.parentId,
@@ -612,6 +610,7 @@ export class Simulation {
       }
     }
     organism.living = false;
+    this.deathsPending=true;
     const record = this.lineage.get(organism.id);
     if (record && record.deathTick === undefined) {
       record.deathTick = this.ticks;
@@ -703,7 +702,7 @@ export class Simulation {
     if (this.deadOrder.length <= this.lineageLimit) return;
     const protectedIds = new Set<number>();
     const protect = (id: number | undefined): void => { while (id !== undefined && !protectedIds.has(id)) { protectedIds.add(id); id = this.lineage.get(id)?.parentId; } };
-    for (const id of this.activeIds) protect(id); protect(this.selectedId);
+    for (const organism of this.active) if(organism.living)protect(organism.id); protect(this.selectedId);
     let deadCount = this.deadOrder.length;
     this.deadOrder = this.deadOrder.filter((id) => {
       if (deadCount <= this.lineageLimit) return true;
