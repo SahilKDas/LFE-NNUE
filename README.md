@@ -87,3 +87,14 @@ The TypeScript worker uses shared copy-on-write genomes, batched climate rows, r
 npm run build:nim
 npm run benchmark:nim
 ~~~
+
+## Native C++ application
+
+The dependency-free Windows build uses C++23, Win32, GDI, a fixed-step 60 TPS loop, seeded terrain/resources, 10,000 neural organisms, energy metabolism, and click-to-inspect telemetry. Build it with MinGW GCC:
+
+~~~sh
+cmake -S native -B native/build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+cmake --build native/build -j 4
+~~~
+
+Run `native/build/life_engine.exe`. Press Space to pause, R to generate a new seeded world, and click an organism to inspect it.

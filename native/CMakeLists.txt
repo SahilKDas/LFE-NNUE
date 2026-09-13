@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.20)
+project(LifeEngineNative LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+add_executable(life_engine WIN32 src/main.cpp)
+target_compile_options(life_engine PRIVATE -O3 -Wall -Wextra)
+target_link_options(life_engine PRIVATE -municode -static -static-libgcc -static-libstdc++)
+target_link_libraries(life_engine PRIVATE user32 gdi32)
