@@ -53,6 +53,12 @@ export interface OrganismInspection {
   perceptionRadius:number;
   senseChannels:number;
   neuralCost:number;
+  diet:string;
+  terrain:string;
+  resource:string;
+  attackDurability:number;
+  armorDurability:number;
+  metabolicCost:number;
 }
 
 interface LineageRecord {
@@ -269,6 +275,7 @@ export class Simulation {
     };
     record.children.forEach(visit);
     const localClimate = climateAt(organism?.y ?? Math.floor(this.height / 2), this.height, this.ticks);
+    const inspectX=organism?.x??Math.floor(this.width/2),inspectY=organism?.y??Math.floor(this.height/2),inspectIndex=this.safeIndex(inspectX,inspectY);
     return {
       id,
       parentId: record.parentId,
@@ -296,6 +303,7 @@ export class Simulation {
       fertility: localClimate.fertility, thermalStress: organism?.thermalStress ?? record.thermalStress,
       totalDescendants: record.totalDescendants,
       perceptionRadius:organism?.perceptionRadius??record.perceptionRadius,senseChannels:organism?.senseChannels??record.senseChannels,neuralCost:organism?.neuralCost??record.neuralCost,
+      diet:organism?this.dietName(organism):"Archived",terrain:["Plains","Fertile","Desert","Water","Mountain"][inspectIndex>=0?this.terrain[inspectIndex]!:TerrainType.Mountain]??"Unknown",resource:["None","Plant","Carrion","Mineral"][inspectIndex>=0?this.resources[inspectIndex]!:ResourceType.None]??"None",attackDurability:organism?.cells.reduce((sum,cell)=>sum+(cell.type===CellType.Killer?(cell.durability??0):0),0)??0,armorDurability:organism?.cells.reduce((sum,cell)=>sum+(cell.type===CellType.Armor?(cell.durability??0):0),0)??0,metabolicCost:(organism?.cells.length??record.cells)*CELL_BASE_COST+(organism?.isMover?MOVE_COST:0)+(organism?.neuralCost??record.neuralCost)/20,
     };
   }
 
@@ -708,8 +716,9 @@ export class Simulation {
     });
   }
   private cellName(type: CellType): string {
-    return ["empty", "food", "wall", "mouth", "producer", "mover", "killer", "armor"][type] ?? "unknown";
+    return ["empty","food","wall","mouth","producer","mover","killer","armor","plant mouth","scavenger mouth","mineral mouth","inert tissue"][type]??"unknown";
   }
+  private dietName(organism:Organism):string { const diets:string[]=[];if(organism.cells.some(cell=>cell.type===CellType.Mouth||cell.type===CellType.PlantMouth))diets.push("Plant");if(organism.cells.some(cell=>cell.type===CellType.ScavengerMouth))diets.push("Carrion");if(organism.cells.some(cell=>cell.type===CellType.MineralMouth))diets.push("Mineral");return diets.join(" + ")||"None"; }
   private safeIndex(x: number, y: number): number { return x >= 0 && y >= 0 && x < this.width && y < this.height ? y * this.width + x : -1; }
   private updateClimateCache():void { for(let y=0;y<this.height;y++){const sample=climateAt(y,this.height,this.ticks);this.climateTemperature[y]=sample.temperature;this.climateFertility[y]=sample.fertility;this.climateGradient[y]=sample.gradient;this.climateBand[y]=sample.temperatureBand;} }
   private sensorOffsets():readonly [number,number][]{return SENSOR_OFFSETS;}
