@@ -4,6 +4,8 @@ import { CellType, DIRECTIONS, ResourceType, TerrainType, type LocalCell, type M
 import { generateWorld, terrainPassable, type WorldLayers } from "./world";
 
 const enum Direction { Up, Down, Left, Right }
+const ENERGY_SCALE=1000, START_ENERGY=12*ENERGY_SCALE, PLANT_ENERGY=4*ENERGY_SCALE, CARRION_ENERGY=3*ENERGY_SCALE;
+const CELL_BASE_COST=2, MOVE_COST=15, PRODUCE_COST=5, ATTACK_COST=120, KILLER_DURABILITY=12, ARMOR_DURABILITY=18;
 
 export interface LineageSummary {
   id: number;
@@ -27,6 +29,8 @@ export interface OrganismInspection {
   deathTick?: number;
   age: number;
   cells: number;
+  energy: number;
+  minerals: number;
   food: number;
   damage: number;
   mutability: number;
@@ -55,7 +59,8 @@ interface LineageRecord {
   mutations: string[];
   children: number[];
   cells: number;
-  food: number;
+  energy: number;
+  minerals: number;
   damage: number;
   mutability: number;
   neuralMutability: number;
@@ -76,7 +81,8 @@ interface Organism {
   y: number;
   cells: LocalCell[];
   brain?: Nnue;
-  food: number;
+  energy: number;
+  minerals: number;
   lifetime: number;
   damage: number;
   mutability: number;
@@ -250,7 +256,9 @@ export class Simulation {
       deathTick: record.deathTick,
       age: organism?.lifetime ?? Math.max(0, (record.deathTick ?? this.ticks) - record.birthTick),
       cells: organism?.cells.length ?? record.cells,
-      food: organism?.food ?? record.food,
+      energy: organism?.energy ?? record.energy,
+      minerals: organism?.minerals ?? record.minerals,
+      food: Math.floor((organism?.energy ?? record.energy)/ENERGY_SCALE),
       damage: organism?.damage ?? record.damage,
       mutability: organism?.mutability ?? record.mutability,
       neuralMutability: organism?.neuralMutability ?? record.neuralMutability,
@@ -294,7 +302,7 @@ export class Simulation {
         birthTick: this.ticks,
         cells: parent.cells.map((cell) => ({ ...cell })),
         brain: parent.brain?.clone(),
-        food: 0, lifetime: 0, damage: 0,
+        energy: Math.floor(parent.energy*.35), minerals: Math.floor(parent.minerals*.25), lifetime: 0, damage: 0,
         mutability: parent.mutability,
         neuralMutability: parent.neuralMutability,
         birthDistance: parent.birthDistance,
@@ -311,7 +319,7 @@ export class Simulation {
     return {
       id: this.nextId++, x, y, cells: [],
       generation: 0, birthTick: this.ticks,
-      food: 0, lifetime: 0, damage: 0,
+      energy: START_ENERGY, minerals: 0, lifetime: 0, damage: 0,
       mutability: 5, neuralMutability: 8, birthDistance: 4, moveRange: 4, moveCount: 0,
       direction: Direction.Up, rotation: Direction.Up,
       living: true, isProducer: false, isMover: false, mutations: [], thermalStress: 0, featureBuffer: [],
@@ -321,6 +329,7 @@ export class Simulation {
   private updateOrganism(organism: Organism): void {
     if (!organism.living) return;
     organism.lifetime++;
+    organism.energy-=organism.cells.length*CELL_BASE_COST;
     const localClimate = climateAt(organism.y, this.height, this.ticks);
     organism.thermalStress = Math.max(0, organism.thermalStress + thermalStressDelta(localClimate.temperature));
     if (organism.thermalStress >= 1) { organism.thermalStress -= 1; this.harm(organism); if (!organism.living) return; }
@@ -328,10 +337,11 @@ export class Simulation {
       this.die(organism);
       return;
     }
-    if (organism.food >= organism.cells.length) this.reproduce(organism);
+    if(organism.energy<=0){organism.energy=0;this.harm(organism);if(!organism.living)return;}
+    if (organism.energy >= organism.cells.length*6*ENERGY_SCALE) this.reproduce(organism);
     for (const local of organism.cells) {
       const [x, y] = this.realLocation(organism, local);
-      if (local.type === CellType.Mouth) this.eat(organism, x, y);
+      if (local.type === CellType.Mouth || local.type===CellType.PlantMouth || local.type===CellType.ScavengerMouth || local.type===CellType.MineralMouth) this.eat(organism,local.type,x,y);
       else if (local.type === CellType.Producer) this.produce(organism, x, y);
       else if (local.type === CellType.Killer) this.attack(organism, x, y);
     }
@@ -343,6 +353,7 @@ export class Simulation {
     organism.direction = action as Direction;
     if (organism.direction >= 4) return;
     organism.moveCount++;
+    organism.energy=Math.max(0,organism.energy-MOVE_COST);
     this.attemptMove(organism);
     if (organism.moveCount > organism.moveRange) this.attemptRotate(organism);
   }
@@ -370,7 +381,7 @@ export class Simulation {
     if (this.isClear(child, child.x, child.y) && this.isStraightPath(child.x, child.y, parent.x, parent.y, parent)) {
       this.addOrganism(child);
     }
-    parent.food -= parent.cells.length;
+    parent.energy=Math.max(0,parent.energy-child.energy); parent.minerals=Math.max(0,parent.minerals-child.minerals);
   }
 
   private mutate(organism: Organism): void {
@@ -414,7 +425,7 @@ export class Simulation {
 
   private addCell(organism: Organism, type: CellType, x: number, y: number): boolean {
     if (organism.cells.some((cell) => cell.x === x && cell.y === y)) return false;
-    organism.cells.push({ type, x, y });
+    organism.cells.push({ type, x, y, durability:type===CellType.Killer?KILLER_DURABILITY:type===CellType.Armor?ARMOR_DURABILITY:undefined });
     this.refreshCapabilities(organism);
     return true;
   }
@@ -426,21 +437,25 @@ export class Simulation {
     else organism.brain = undefined;
   }
 
-  private eat(organism: Organism, x: number, y: number): void {
+  private eat(organism: Organism, mouth:CellType, x: number, y: number): void {
     for (const [dx, dy] of DIRECTIONS) {
       const index = this.safeIndex(x + dx, y + dy);
-      if (index >= 0 && this.cells[index] === CellType.Food) {
+      if(index<0)continue;
+      const resource=this.resources[index] as ResourceType;
+      const compatible=((mouth===CellType.Mouth||mouth===CellType.PlantMouth)&&resource===ResourceType.Plant)||(mouth===CellType.ScavengerMouth&&resource===ResourceType.Carrion)||(mouth===CellType.MineralMouth&&resource===ResourceType.Mineral);
+      if(compatible&&this.resourceAmount[index]!>0){const consumed=Math.min(100,this.resourceAmount[index]!);this.resourceAmount[index]=this.resourceAmount[index]!-consumed;if(resource===ResourceType.Mineral)organism.minerals+=consumed;else organism.energy+=Math.floor(consumed/100*(resource===ResourceType.Plant?PLANT_ENERGY:CARRION_ENERGY));if(this.resourceAmount[index]===0)this.resources[index]=ResourceType.None;this.markDirty(index);}
+      else if (this.cells[index] === CellType.Food) {
         this.write(index, CellType.Empty, -1);
-        organism.food++;
+        organism.energy+=PLANT_ENERGY;
       }
     }
   }
 
   private produce(organism: Organism, x: number, y: number): void {
-    if ((organism.isMover && !this.moversCanProduce) || Math.random() >= this.foodChance * climateAt(y, this.height, this.ticks).fertility) return;
+    if ((organism.isMover && !this.moversCanProduce) || organism.energy<PRODUCE_COST || Math.random() >= this.foodChance * climateAt(y, this.height, this.ticks).fertility) return;
     const [dx, dy] = DIRECTIONS[Math.floor(Math.random() * 4)]!;
     const index = this.safeIndex(x + dx, y + dy);
-    if (index >= 0 && this.cells[index] === CellType.Empty) this.write(index, CellType.Food, -1);
+    if(index>=0&&terrainPassable(this.terrain[index] as TerrainType)){organism.energy-=PRODUCE_COST;this.resources[index]=ResourceType.Plant;this.resourceAmount[index]=Math.min(65535,this.resourceAmount[index]!+50);this.markDirty(index);}
   }
 
   private attack(attacker: Organism, x: number, y: number): void {
@@ -528,7 +543,7 @@ export class Simulation {
       features.push(square++ * FEATURE_CATEGORIES + category);
     }
     const state = POSITION_COUNT * FEATURE_CATEGORIES;
-    features.push(state + (organism.food >= organism.cells.length ? 1 : 0));
+    features.push(state + (organism.energy >= organism.cells.length*6*ENERGY_SCALE ? 1 : 0));
     features.push(state + 2 + (organism.damage > 0 ? 1 : 0));
     features.push(state + 4 + organism.direction);
     const climate = climateAt(organism.y, this.height, this.ticks);
@@ -548,7 +563,8 @@ export class Simulation {
       mutations: organism.mutations,
       children: [],
       cells: organism.cells.length,
-      food: organism.food,
+      energy: organism.energy,
+      minerals: organism.minerals,
       damage: organism.damage,
       mutability: organism.mutability,
       neuralMutability: organism.neuralMutability,
@@ -570,7 +586,7 @@ export class Simulation {
       const [x, y] = this.realLocation(organism, cell);
       const index = this.safeIndex(x, y);
       if (index >= 0 && this.owners[index] === organism.id) {
-        this.write(index, CellType.Food, -1);
+        this.write(index, CellType.Empty, -1);this.resources[index]=ResourceType.Carrion;this.resourceAmount[index]=Math.min(65535,this.resourceAmount[index]!+200+Math.floor(organism.energy/Math.max(1,organism.cells.length)/20));this.markDirty(index);
       }
     }
     organism.living = false;
@@ -578,7 +594,8 @@ export class Simulation {
     if (record && record.deathTick === undefined) {
       record.deathTick = this.ticks;
       record.cells = organism.cells.length;
-      record.food = organism.food;
+      record.energy = organism.energy;
+      record.minerals = organism.minerals;
       record.damage = organism.damage;
       record.mutability = organism.mutability;
       record.neuralMutability = organism.neuralMutability;
@@ -628,7 +645,7 @@ export class Simulation {
   }
 
   private randomDirection(): Direction { return Math.floor(Math.random() * 4) as Direction; }
-  private randomLivingType(): CellType { return CellType.Mouth + Math.floor(Math.random() * 5); }
+  private randomLivingType(): CellType { const types=[CellType.PlantMouth,CellType.ScavengerMouth,CellType.MineralMouth,CellType.Producer,CellType.Mover,CellType.Killer,CellType.Armor];return types[Math.floor(Math.random()*types.length)]!; }
   private bestAction(outputs: ArrayLike<number>): number {
     let best = 0;
     for (let index = 1; index < outputs.length; index++) if (outputs[index]! > outputs[best]!) best = index;

@@ -20,6 +20,7 @@ export interface LocalCell {
   type: CellType;
   x: number;
   y: number;
+  durability?: number;
 }
 
 export interface Metrics {
