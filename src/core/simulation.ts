@@ -2,10 +2,11 @@ import { CLIMATE_FEATURE_OFFSET, FEATURE_CATEGORIES, Nnue, POSITION_COUNT, SENSO
 import { climateAt, thermalStressDelta, type ClimateSample } from "./climate";
 import { CellType, DIRECTIONS, ResourceType, TerrainType, type LocalCell, type Metrics } from "./types";
 import { generateWorld, terrainPassable, type WorldLayers } from "./world";
+import { ARMOR_DURABILITY, ATTACK_COST, constructionMinerals, KILLER_DURABILITY, predatorGain } from "./ecology";
 
 const enum Direction { Up, Down, Left, Right }
 const ENERGY_SCALE=1000, START_ENERGY=12*ENERGY_SCALE, PLANT_ENERGY=4*ENERGY_SCALE, CARRION_ENERGY=3*ENERGY_SCALE;
-const CELL_BASE_COST=2, MOVE_COST=15, PRODUCE_COST=5, ATTACK_COST=120, KILLER_DURABILITY=12, ARMOR_DURABILITY=18;
+const CELL_BASE_COST=2, MOVE_COST=15, PRODUCE_COST=5;
 
 export interface LineageSummary {
   id: number;
@@ -343,7 +344,7 @@ export class Simulation {
       const [x, y] = this.realLocation(organism, local);
       if (local.type === CellType.Mouth || local.type===CellType.PlantMouth || local.type===CellType.ScavengerMouth || local.type===CellType.MineralMouth) this.eat(organism,local.type,x,y);
       else if (local.type === CellType.Producer) this.produce(organism, x, y);
-      else if (local.type === CellType.Killer) this.attack(organism, x, y);
+      else if (local.type === CellType.Killer) this.attack(organism, local, x, y);
     }
     if (!organism.living || !organism.isMover || !organism.brain) return;
     const features = this.features(organism);
@@ -359,6 +360,7 @@ export class Simulation {
   }
 
   private reproduce(parent: Organism): void {
+    const growthMinerals=Math.max(0,parent.cells.length-3)*100;if(parent.minerals<growthMinerals)return;
     const child = this.createOrganism(0, 0, parent);
     if (this.offspringRotate) child.rotation = this.randomDirection();
     child.mutability += Math.random() <= 0.5 ? 1 : -1;
@@ -379,6 +381,7 @@ export class Simulation {
     child.x = parent.x + direction[0] * (parent.birthDistance + offset);
     child.y = parent.y + direction[1] * (parent.birthDistance + offset);
     if (this.isClear(child, child.x, child.y) && this.isStraightPath(child.x, child.y, parent.x, parent.y, parent)) {
+      parent.minerals-=growthMinerals;
       this.addOrganism(child);
     }
     parent.energy=Math.max(0,parent.energy-child.energy); parent.minerals=Math.max(0,parent.minerals-child.minerals);
@@ -390,14 +393,16 @@ export class Simulation {
       const base = organism.cells[Math.floor(Math.random() * organism.cells.length)]!;
       const [dx, dy] = [...DIRECTIONS, [-1, -1], [1, 1], [-1, 1], [1, -1]][Math.floor(Math.random() * 8)]!;
       const type = this.randomLivingType();
-      if (this.addCell(organism, type, base.x + dx, base.y + dy)) {
+      const mineralCost=constructionMinerals(type);
+      if (organism.minerals>=mineralCost&&this.addCell(organism, type, base.x + dx, base.y + dy)) {
+        organism.minerals-=mineralCost;
         organism.birthDistance++;
         organism.mutations.push(`Added ${this.cellName(type)} cell`);
       }
     } else if (choice <= 66) {
       const cell = organism.cells[Math.floor(Math.random() * organism.cells.length)]!;
       const before = cell.type;
-      cell.type = this.randomLivingType();
+      const nextType=this.randomLivingType(),mineralCost=constructionMinerals(nextType);if(organism.minerals<mineralCost)return;organism.minerals-=mineralCost;cell.type = nextType;cell.durability=nextType===CellType.Killer?KILLER_DURABILITY:nextType===CellType.Armor?ARMOR_DURABILITY:undefined;
       organism.mutations.push(`Changed ${this.cellName(before)} to ${this.cellName(cell.type)}`);
       this.refreshCapabilities(organism);
     } else if (organism.cells.length > 1) {
@@ -458,15 +463,17 @@ export class Simulation {
     if(index>=0&&terrainPassable(this.terrain[index] as TerrainType)){organism.energy-=PRODUCE_COST;this.resources[index]=ResourceType.Plant;this.resourceAmount[index]=Math.min(65535,this.resourceAmount[index]!+50);this.markDirty(index);}
   }
 
-  private attack(attacker: Organism, x: number, y: number): void {
+  private attack(attacker: Organism, weapon:LocalCell, x: number, y: number): void {
+    if(!weapon.durability)return;
     for (const [dx, dy] of DIRECTIONS) {
       const index = this.safeIndex(x + dx, y + dy);
       if (index < 0 || this.cells[index] === CellType.Armor) continue;
       const victim = this.ownerAt(index);
       if (!victim || victim === attacker || !victim.living) continue;
       const mutualHit = this.cells[index] === CellType.Killer;
-      this.harm(victim);
+      if(attacker.energy<ATTACK_COST)return;attacker.energy-=ATTACK_COST;weapon.durability--;const before=victim.damage;this.harmAt(victim,index);attacker.energy+=predatorGain(victim.damage>before);
       if (mutualHit) this.harm(attacker);
+      if(weapon.durability<=0){weapon.type=CellType.Inert;this.write(this.safeIndex(x,y),CellType.Inert,attacker.id);this.refreshCapabilities(attacker);return;}
     }
   }
 
@@ -474,6 +481,7 @@ export class Simulation {
     organism.damage++;
     if (this.instaKill || organism.damage >= organism.cells.length) this.die(organism);
   }
+  private harmAt(organism:Organism,index:number):void { if(this.cells[index]===CellType.Armor){const armor=this.localCellAt(organism,index%this.width,Math.floor(index/this.width));if(armor?.durability){armor.durability--;if(armor.durability<=0){armor.type=CellType.Inert;this.write(index,CellType.Inert,organism.id);this.refreshCapabilities(organism);}return;}}this.harm(organism); }
 
   private attemptMove(organism: Organism): boolean {
     const [dx, dy] = DIRECTIONS[organism.direction]!;
@@ -643,6 +651,7 @@ export class Simulation {
     const id = this.owners[index] ?? -1;
     return id < 0 ? undefined : this.organisms.get(id);
   }
+  private localCellAt(organism:Organism,x:number,y:number):LocalCell|undefined { return organism.cells.find(cell=>{const [wx,wy]=this.realLocation(organism,cell);return wx===x&&wy===y;}); }
 
   private randomDirection(): Direction { return Math.floor(Math.random() * 4) as Direction; }
   private randomLivingType(): CellType { const types=[CellType.PlantMouth,CellType.ScavengerMouth,CellType.MineralMouth,CellType.Producer,CellType.Mover,CellType.Killer,CellType.Armor];return types[Math.floor(Math.random()*types.length)]!; }
