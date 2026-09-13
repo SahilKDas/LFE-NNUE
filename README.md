@@ -74,3 +74,16 @@ Choose the Inspect tool and click any living organism to open its observatory re
 - all five NNUE output probabilities and the selected action
 
 Ancestors and descendants are clickable, and lineage records remain inspectable after an organism dies. Resetting the world intentionally begins a new lineage archive.
+
+## Rich ecology and performance
+
+Seeded worlds now have separate terrain, organism, resource, and quantity layers. Fertile land, plains, deserts, water, and mountains interact with seasons. Plant, scavenger, and mineral mouths occupy distinct niches; fixed-point energy drives metabolism and reproduction, minerals gate combat tissue, deaths leave carrion, and killer/armor durability wears into inert tissue.
+
+Perception radius and channel masks are heritable. Larger sensory workloads cost energy and reduce decision cadence under a hard inference budget, while movement remains exclusively NNUE-directed. The UI includes ecology editors, overlays, measured TPS/FPS, population summaries, and expanded inspection data.
+
+The TypeScript worker uses shared copy-on-write genomes, batched climate rows, renderer acknowledgements, and movement fast paths. `npm run benchmark` runs its strict 10k-at-60-TPS gate. If that gate fails, the optional Nim backend compiles directly to JavaScript—without Wasm or Emscripten:
+
+~~~sh
+npm run build:nim
+npm run benchmark:nim
+~~~
