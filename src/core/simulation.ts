@@ -1,5 +1,5 @@
 import { CLIMATE_FEATURE_OFFSET, DEFAULT_SENSOR_RADIUS, DEFAULT_SENSE_CHANNELS, FEATURE_CATEGORIES, MAX_SENSOR_RADIUS, Nnue, POSITION_COUNT, SenseChannel, STATE_FEATURE_OFFSET, clampPerception, type BrainSeed } from "./nnue";
-import { climateAt, thermalStressDelta, type ClimateSample } from "./climate";
+import { climateAt, fillClimateRows, thermalStressDelta, type ClimateSample } from "./climate";
 import { CellType, DIRECTIONS, ResourceType, TerrainType, type LocalCell, type Metrics } from "./types";
 import { generateWorld, terrainPassable, terrainProductivity } from "./world";
 import { ARMOR_DURABILITY, ATTACK_COST, climateMetabolicCost, constructionMinerals, KILLER_DURABILITY, predatorGain } from "./ecology";
@@ -521,6 +521,7 @@ export class Simulation {
 
   private attemptMove(organism: Organism): boolean {
     const [dx, dy] = DIRECTIONS[organism.direction]!;
+    if(organism.cells.length===1){const cell=organism.cells[0]!;if(cell.x===0&&cell.y===0){const target=this.safeIndex(organism.x+dx,organism.y+dy);if(target<0||!terrainPassable(this.terrain[target] as TerrainType)||this.cells[target]!==CellType.Empty)return false;const previous=this.safeIndex(organism.x,organism.y);if(previous>=0)this.write(previous,CellType.Empty,-1);organism.x+=dx;organism.y+=dy;this.write(target,cell.type,organism.id);return true;}}
     if (!this.isClear(organism, organism.x + dx, organism.y + dy)) return false;
     this.clearBody(organism);
     organism.x += dx; organism.y += dy;
@@ -720,7 +721,7 @@ export class Simulation {
   }
   private dietName(organism:Organism):string { const diets:string[]=[];if(organism.cells.some(cell=>cell.type===CellType.Mouth||cell.type===CellType.PlantMouth))diets.push("Plant");if(organism.cells.some(cell=>cell.type===CellType.ScavengerMouth))diets.push("Carrion");if(organism.cells.some(cell=>cell.type===CellType.MineralMouth))diets.push("Mineral");return diets.join(" + ")||"None"; }
   private safeIndex(x: number, y: number): number { return x >= 0 && y >= 0 && x < this.width && y < this.height ? y * this.width + x : -1; }
-  private updateClimateCache():void { for(let y=0;y<this.height;y++){const sample=climateAt(y,this.height,this.ticks);this.climateTemperature[y]=sample.temperature;this.climateFertility[y]=sample.fertility;this.climateGradient[y]=sample.gradient;this.climateBand[y]=sample.temperatureBand;} }
+  private updateClimateCache():void { fillClimateRows(this.height,this.ticks,this.climateTemperature,this.climateFertility,this.climateGradient,this.climateBand); }
   private sensorOffsets():readonly [number,number][]{return SENSOR_OFFSETS;}
   private markDirty(index:number):void { if(this.dirtyFlags[index]===0){this.dirtyFlags[index]=1;this.dirty.push(index);} }
   private write(index: number, type: CellType, owner: number): void { this.cells[index]=type; this.owners[index]=owner; this.markDirty(index); }
