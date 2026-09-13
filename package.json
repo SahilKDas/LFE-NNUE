@@ -11,6 +11,8 @@
     "test:watch": "vitest",
     "train": "tsx scripts/train.ts",
     "benchmark": "tsx scripts/benchmark.ts",
+    "build:nim": "nim js -d:release --out:public/nim-ecology-kernel.js nim/simulation_kernel.nim",
+    "benchmark:nim": "node scripts/benchmark-nim.mjs",
     "verify": "npm run test && npm run train && npm run build"
   },
   "devDependencies": {
