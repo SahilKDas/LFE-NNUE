@@ -155,6 +155,7 @@ export class Simulation {
   private dirty: number[] = [];
   private dirtyFlags: Uint8Array;
   private readonly lineageLimit: number;
+  private nnueEvaluations=0;
 
   constructor(options: SimulationOptions, private readonly seed?: BrainSeed) {
     this.width = options.width;
@@ -212,8 +213,8 @@ export class Simulation {
   }
 
   metrics(): Metrics {
-    let mutation = 0; let stress = 0;
-    for (const organism of this.organisms.values()) { mutation += organism.mutability; stress += organism.thermalStress; }
+    let mutation=0,stress=0,energy=0,plantEaters=0,scavengers=0,mineralEaters=0,predators=0;
+    for(const organism of this.organisms.values()){mutation+=organism.mutability;stress+=organism.thermalStress;energy+=organism.energy;for(const cell of organism.cells){if(cell.type===CellType.Mouth||cell.type===CellType.PlantMouth)plantEaters++;else if(cell.type===CellType.ScavengerMouth)scavengers++;else if(cell.type===CellType.MineralMouth)mineralEaters++;else if(cell.type===CellType.Killer)predators++;}}
     const climate = climateAt(Math.floor(this.height / 2), this.height, this.ticks);
     return {
       organisms: this.active.length,
@@ -224,6 +225,7 @@ export class Simulation {
       averageMutation: this.active.length ? mutation / this.active.length : 0,
       season: climate.season, seasonPhase: climate.phase, temperature: climate.temperature,
       fertility: climate.fertility, averageStress: this.active.length ? stress / this.active.length : 0,
+      averageEnergy:this.active.length?energy/this.active.length/ENERGY_SCALE:0,plantEaters,scavengers,mineralEaters,predators,nnueEvaluations:this.nnueEvaluations,measuredTps:0,renderBacklog:0,memoryEstimate:this.cells.byteLength+this.owners.byteLength+this.terrain.byteLength+this.resources.byteLength+this.resourceAmount.byteLength,
     };
   }
 
@@ -363,7 +365,7 @@ export class Simulation {
     }
     if (!organism.living || !organism.isMover || !organism.brain) return;
     const decisionInterval=Math.max(1,Math.min(16,Math.ceil(organism.neuralCost/16)));
-    if((this.ticks+organism.id)%decisionInterval===0){organism.energy=Math.max(0,organism.energy-Math.ceil(organism.neuralCost/20));const features=this.features(organism),outputs=organism.brain.evaluate(features),action=this.bestAction(outputs);if(organism.id===this.selectedId){organism.lastFeatures=features;organism.lastOutputs=Array.from(outputs);organism.lastAction=action;}organism.direction=action as Direction;}
+    if((this.ticks+organism.id)%decisionInterval===0){this.nnueEvaluations++;organism.energy=Math.max(0,organism.energy-Math.ceil(organism.neuralCost/20));const features=this.features(organism),outputs=organism.brain.evaluate(features),action=this.bestAction(outputs);if(organism.id===this.selectedId){organism.lastFeatures=features;organism.lastOutputs=Array.from(outputs);organism.lastAction=action;}organism.direction=action as Direction;}
     if (organism.direction >= 4) return;
     organism.moveCount++;
     organism.energy=Math.max(0,organism.energy-MOVE_COST);

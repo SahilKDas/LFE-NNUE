@@ -35,6 +35,15 @@ export interface Metrics {
   temperature: number;
   fertility: number;
   averageStress: number;
+  averageEnergy:number;
+  plantEaters:number;
+  scavengers:number;
+  mineralEaters:number;
+  predators:number;
+  nnueEvaluations:number;
+  measuredTps:number;
+  renderBacklog:number;
+  memoryEstimate:number;
 }
 
 export const DIRECTIONS = [[0, -1], [0, 1], [-1, 0], [1, 0]] as const;

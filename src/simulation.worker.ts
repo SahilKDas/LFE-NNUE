@@ -12,6 +12,7 @@ let accumulator = 0;
 let lastFlush = 0;
 let lastTelemetry = 0;
 let awaitingRender = false;
+let telemetryTicks=0,telemetryTime=performance.now();
 
 function send(message: WorkerResponse, transfer: Transferable[] = []): void { scope.postMessage(message, transfer); }
 function fullSnapshot(): void {
@@ -26,7 +27,7 @@ function flush(): void {
   const delta = activeSimulation.consumeDelta();
   if(delta.indices.length){const terrain=Uint8Array.from(delta.indices,index=>activeSimulation.terrain[index]!),resources=Uint8Array.from(delta.indices,index=>activeSimulation.resources[index]!),resourceAmount=Uint16Array.from(delta.indices,index=>activeSimulation.resourceAmount[index]!);awaitingRender=true;send({type:"cell-delta",...delta,terrain,resources,resourceAmount},[delta.indices.buffer,delta.cells.buffer,delta.owners.buffer,terrain.buffer,resources.buffer,resourceAmount.buffer]);}
   const now=performance.now();
-  if(now-lastTelemetry>=100){lastTelemetry=now;send({type:"metrics",metrics:simulation.metrics()});if(selectedId!==undefined)send({type:"selection",id:selectedId,inspection:simulation.inspect(selectedId)});}
+  if(now-lastTelemetry>=100){const metrics=simulation.metrics(),elapsed=now-telemetryTime;metrics.measuredTps=elapsed>0?(metrics.ticks-telemetryTicks)*1000/elapsed:0;metrics.renderBacklog=awaitingRender?1:0;telemetryTicks=metrics.ticks;telemetryTime=now;lastTelemetry=now;send({type:"metrics",metrics});if(selectedId!==undefined)send({type:"selection",id:selectedId,inspection:simulation.inspect(selectedId)});}
 }
 
 scope.onmessage = ({ data }: MessageEvent<WorkerCommand>) => {
