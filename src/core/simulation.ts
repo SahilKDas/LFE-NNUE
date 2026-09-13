@@ -128,7 +128,8 @@ export class Simulation {
   private lineage = new Map<number, LineageRecord>();
   private deadOrder: number[] = [];
   private selectedId?: number;
-  private dirty = new Set<number>();
+  private dirty: number[] = [];
+  private dirtyFlags: Uint8Array;
   private readonly lineageLimit: number;
 
   constructor(options: SimulationOptions, private readonly seed?: BrainSeed) {
@@ -139,6 +140,7 @@ export class Simulation {
     this.lineageLimit = options.lineageLimit ?? 20_000;
     this.cells = new Uint8Array(this.width * this.height);
     this.owners = new Int32Array(this.width * this.height);
+    this.dirtyFlags = new Uint8Array(this.width * this.height);
     this.reset();
   }
 
@@ -149,7 +151,7 @@ export class Simulation {
     this.activeIds = [];
     this.lineage.clear();
     this.deadOrder = [];
-    this.dirty.clear();
+    this.dirty.length = 0; this.dirtyFlags.fill(0);
     this.ticks = 0;
     this.resets++;
     const organism = this.createOrganism(Math.floor(this.width / 2), Math.floor(this.height / 2));
@@ -256,7 +258,7 @@ export class Simulation {
   select(id?: number): void { this.selectedId = id; }
   climateAt(y: number): ClimateSample { return climateAt(y, this.height, this.ticks); }
   populateBenchmark(count = 10_000): void {
-    this.cells.fill(CellType.Empty); this.owners.fill(-1); this.organisms.clear(); this.activeIds=[]; this.lineage.clear(); this.deadOrder=[]; this.dirty.clear();
+    this.cells.fill(CellType.Empty); this.owners.fill(-1); this.organisms.clear(); this.activeIds=[]; this.lineage.clear(); this.deadOrder=[]; this.dirty.length=0; this.dirtyFlags.fill(0);
     const columns = Math.floor(Math.sqrt(count * this.width / this.height));
     for (let index=0; index<count; index++) {
       const x = 1 + Math.floor(index % columns) * Math.max(1, Math.floor((this.width-2)/columns));
@@ -265,8 +267,9 @@ export class Simulation {
     }
   }
   consumeDelta(): CellDelta {
-    const sorted = Array.from(this.dirty).sort((a, b) => a - b); this.dirty.clear();
-    return { indices: Uint32Array.from(sorted), cells: Uint8Array.from(sorted, (index) => this.cells[index]!), owners: Int32Array.from(sorted, (index) => this.owners[index]!) };
+    const indices=Uint32Array.from(this.dirty), cells=Uint8Array.from(this.dirty,(index)=>this.cells[index]!), owners=Int32Array.from(this.dirty,(index)=>this.owners[index]!);
+    for(let cursor=0;cursor<this.dirty.length;cursor++) this.dirtyFlags[this.dirty[cursor]!] = 0;
+    this.dirty.length=0; return { indices, cells, owners };
   }
 
   private createOrganism(x: number, y: number, parent?: Organism): Organism {
@@ -639,7 +642,7 @@ export class Simulation {
     return ["empty", "food", "wall", "mouth", "producer", "mover", "killer", "armor"][type] ?? "unknown";
   }
   private safeIndex(x: number, y: number): number { return x >= 0 && y >= 0 && x < this.width && y < this.height ? y * this.width + x : -1; }
-  private write(index: number, type: CellType, owner: number): void { this.cells[index] = type; this.owners[index] = owner; this.dirty.add(index); }
+  private write(index: number, type: CellType, owner: number): void { this.cells[index]=type; this.owners[index]=owner; if(this.dirtyFlags[index]===0){this.dirtyFlags[index]=1;this.dirty.push(index);} }
   private pruneLineage(): void {
     if (this.deadOrder.length <= this.lineageLimit) return;
     const protectedIds = new Set<number>();

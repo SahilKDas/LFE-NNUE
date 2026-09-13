@@ -9,7 +9,8 @@ export type WorkerCommand =
   | { type: "reset" }
   | { type: "settings"; foodChance?: number; lifespan?: number }
   | { type: "select"; x: number; y: number }
-  | { type: "inspect"; id: number };
+  | { type: "inspect"; id: number }
+  | { type: "render-ack" };
 
 export type WorkerResponse =
   | { type: "ready"; width: number; height: number }
