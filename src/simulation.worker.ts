@@ -53,5 +53,5 @@ scope.onmessage = ({ data }: MessageEvent<WorkerCommand>) => {
 
 setInterval(() => {
   const now = performance.now(); const elapsed = Math.min(250, now - lastTime); lastTime = now;
-  if (simulation && running) { accumulator += elapsed*ticksPerSecond/1000; const steps=Math.floor(accumulator); if(steps>0){accumulator-=steps;simulation.step(steps);} if(!awaitingRender&&now-lastFlush>=1000/30){lastFlush=now;flush();} }
+  if (simulation && running) { accumulator += elapsed*ticksPerSecond/1000; const steps=Math.floor(accumulator); if(steps>0){accumulator-=steps;simulation.step(steps);} if(!awaitingRender&&now-lastFlush>=50){lastFlush=now;flush();} }
 }, 16);
