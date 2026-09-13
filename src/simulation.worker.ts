@@ -16,14 +16,15 @@ let awaitingRender = false;
 function send(message: WorkerResponse, transfer: Transferable[] = []): void { scope.postMessage(message, transfer); }
 function fullSnapshot(): void {
   if (!simulation) return;
-  const cells = simulation.cells.slice(); const owners = simulation.owners.slice();
-  send({ type: "full-snapshot", width: simulation.width, height: simulation.height, cells, owners }, [cells.buffer, owners.buffer]);
+  const cells=simulation.cells.slice(),owners=simulation.owners.slice(),terrain=simulation.terrain.slice(),resources=simulation.resources.slice(),resourceAmount=simulation.resourceAmount.slice();
+  send({type:"full-snapshot",width:simulation.width,height:simulation.height,cells,owners,terrain,resources,resourceAmount},[cells.buffer,owners.buffer,terrain.buffer,resources.buffer,resourceAmount.buffer]);
   simulation.consumeDelta();
 }
 function flush(): void {
   if (!simulation) return;
-  const delta = simulation.consumeDelta();
-  if (delta.indices.length) { awaitingRender=true; send({ type: "cell-delta", ...delta }, [delta.indices.buffer, delta.cells.buffer, delta.owners.buffer]); }
+  const activeSimulation=simulation;
+  const delta = activeSimulation.consumeDelta();
+  if(delta.indices.length){const terrain=Uint8Array.from(delta.indices,index=>activeSimulation.terrain[index]!),resources=Uint8Array.from(delta.indices,index=>activeSimulation.resources[index]!),resourceAmount=Uint16Array.from(delta.indices,index=>activeSimulation.resourceAmount[index]!);awaitingRender=true;send({type:"cell-delta",...delta,terrain,resources,resourceAmount},[delta.indices.buffer,delta.cells.buffer,delta.owners.buffer,terrain.buffer,resources.buffer,resourceAmount.buffer]);}
   const now=performance.now();
   if(now-lastTelemetry>=100){lastTelemetry=now;send({type:"metrics",metrics:simulation.metrics()});if(selectedId!==undefined)send({type:"selection",id:selectedId,inspection:simulation.inspect(selectedId)});}
 }
@@ -36,7 +37,10 @@ scope.onmessage = ({ data }: MessageEvent<WorkerCommand>) => {
     }
     if (!simulation) throw new Error("Simulation worker is not initialized");
     if(data.type==="render-ack"){awaitingRender=false;return;}
-    if (data.type === "step-control") { running = data.running; ticksPerSecond = Math.max(1, Math.min(240, data.ticksPerSecond ?? ticksPerSecond)); }
+    if(data.type==="regenerate"){simulation.regenerateWorld(data.seed);selectedId=undefined;fullSnapshot();return;}
+    if(data.type==="paint-terrain")simulation.paintTerrain(data.x,data.y,data.terrainType);
+    else if(data.type==="paint-resource")simulation.paintResource(data.x,data.y,data.resourceType,data.amount);
+    else if (data.type === "step-control") { running = data.running; ticksPerSecond = Math.max(1, Math.min(240, data.ticksPerSecond ?? ticksPerSecond)); }
     else if (data.type === "paint") simulation.paint(data.x, data.y, data.cellType);
     else if (data.type === "reset") { simulation.reset(); selectedId = undefined; fullSnapshot(); }
     else if (data.type === "settings") { if (data.foodChance !== undefined) simulation.foodChance = data.foodChance; if (data.lifespan !== undefined) simulation.lifespan = data.lifespan; }

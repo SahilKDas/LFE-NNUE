@@ -1,6 +1,7 @@
 import { CLIMATE_FEATURE_OFFSET, FEATURE_CATEGORIES, Nnue, POSITION_COUNT, SENSOR_RADIUS, type BrainSeed } from "./nnue";
 import { climateAt, thermalStressDelta, type ClimateSample } from "./climate";
-import { CellType, DIRECTIONS, type LocalCell, type Metrics } from "./types";
+import { CellType, DIRECTIONS, ResourceType, TerrainType, type LocalCell, type Metrics } from "./types";
+import { generateWorld, terrainPassable, type WorldLayers } from "./world";
 
 const enum Direction { Up, Down, Left, Right }
 
@@ -102,6 +103,7 @@ export interface SimulationOptions {
   foodChance: number;
   lifespan: number;
   lineageLimit?: number;
+  worldSeed?: number;
 }
 
 export interface CellDelta { indices: Uint32Array; cells: Uint8Array; owners: Int32Array; }
@@ -111,6 +113,10 @@ export class Simulation {
   readonly height: number;
   readonly cells: Uint8Array;
   readonly owners: Int32Array;
+  readonly terrain: Uint8Array;
+  readonly resources: Uint8Array;
+  readonly resourceAmount: Uint16Array;
+  worldSeed: number;
   foodChance: number;
   lifespan: number;
   foodBlocksReproduction = true;
@@ -138,8 +144,11 @@ export class Simulation {
     this.foodChance = options.foodChance;
     this.lifespan = options.lifespan;
     this.lineageLimit = options.lineageLimit ?? 20_000;
+    this.worldSeed = options.worldSeed ?? 1;
     this.cells = new Uint8Array(this.width * this.height);
     this.owners = new Int32Array(this.width * this.height);
+    const world=generateWorld(this.width,this.height,this.worldSeed);
+    this.terrain=world.terrain; this.resources=world.resources; this.resourceAmount=world.resourceAmount;
     this.dirtyFlags = new Uint8Array(this.width * this.height);
     this.reset();
   }
@@ -160,6 +169,10 @@ export class Simulation {
     this.addCell(organism, CellType.Producer, 1, 1);
     this.addOrganism(organism);
   }
+
+  regenerateWorld(seed=this.worldSeed):void { const world=generateWorld(this.width,this.height,seed);this.worldSeed=seed;this.terrain.set(world.terrain);this.resources.set(world.resources);this.resourceAmount.set(world.resourceAmount);this.reset(); }
+  paintTerrain(x:number,y:number,type:TerrainType):void { const index=this.safeIndex(x,y);if(index<0)return;const owner=this.ownerAt(index);if(owner&&!terrainPassable(type))this.die(owner);this.terrain[index]=type;this.markDirty(index); }
+  paintResource(x:number,y:number,type:ResourceType,amount=1000):void { const index=this.safeIndex(x,y);if(index<0)return;this.resources[index]=type;this.resourceAmount[index]=type===ResourceType.None?0:amount;this.markDirty(index); }
 
   step(count = 1): void {
     for (let iteration = 0; iteration < count; iteration++) {
@@ -476,7 +489,7 @@ export class Simulation {
     return organism.cells.every((cell) => {
       const [rx, ry] = this.rotated(cell.x, cell.y, rotation);
       const index = this.safeIndex(x + rx, y + ry);
-      return index >= 0 && (this.owners[index] === organism.id || this.cells[index] === CellType.Empty ||
+      return index >= 0 && terrainPassable(this.terrain[index] as TerrainType) && (this.owners[index] === organism.id || this.cells[index] === CellType.Empty ||
         (!this.foodBlocksReproduction && this.cells[index] === CellType.Food));
     });
   }
@@ -492,7 +505,7 @@ export class Simulation {
 
   private passablePath(x: number, y: number, parent: Organism): boolean {
     const index = this.safeIndex(x, y);
-    return index >= 0 && (this.cells[index] === CellType.Empty || this.cells[index] === CellType.Food || this.owners[index] === parent.id);
+    return index >= 0 && terrainPassable(this.terrain[index] as TerrainType) && (this.cells[index] === CellType.Empty || this.cells[index] === CellType.Food || this.owners[index] === parent.id);
   }
 
   private features(organism: Organism): number[] {
@@ -642,7 +655,8 @@ export class Simulation {
     return ["empty", "food", "wall", "mouth", "producer", "mover", "killer", "armor"][type] ?? "unknown";
   }
   private safeIndex(x: number, y: number): number { return x >= 0 && y >= 0 && x < this.width && y < this.height ? y * this.width + x : -1; }
-  private write(index: number, type: CellType, owner: number): void { this.cells[index]=type; this.owners[index]=owner; if(this.dirtyFlags[index]===0){this.dirtyFlags[index]=1;this.dirty.push(index);} }
+  private markDirty(index:number):void { if(this.dirtyFlags[index]===0){this.dirtyFlags[index]=1;this.dirty.push(index);} }
+  private write(index: number, type: CellType, owner: number): void { this.cells[index]=type; this.owners[index]=owner; this.markDirty(index); }
   private pruneLineage(): void {
     if (this.deadOrder.length <= this.lineageLimit) return;
     const protectedIds = new Set<number>();
