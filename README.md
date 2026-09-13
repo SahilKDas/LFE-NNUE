@@ -62,3 +62,15 @@ Mover offspring deep-copy their parent's NNUE. Neural mutation occurs independen
 ## Cell palette
 
 The original cell colors are preserved: green food, orange mouths, white producers, blue movers, red killers, purple armor, gray walls, and a dark-blue world.
+
+## Evolution Observatory
+
+Choose the Inspect tool and click any living organism to open its observatory record. The panel shows:
+
+- its persistent creature ID, generation, life state, age, body size, food, and damage
+- its complete ancestor chain and all recorded descendants
+- body, movement, birth-distance, neural-weight, and neural-mutation-rate changes
+- the live sparse 5x5 sensory input seen by mover organisms
+- all five NNUE output probabilities and the selected action
+
+Ancestors and descendants are clickable, and lineage records remain inspectable after an organism dies. Resetting the world intentionally begins a new lineage archive.

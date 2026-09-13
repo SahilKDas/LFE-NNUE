@@ -40,11 +40,16 @@ app.innerHTML = `
       <section class="panel tools">
         <h3>World tools</h3>
         <div class="tool-row">
-          <button class="tool active" data-tool="1">Food</button>
+          <button class="tool active" data-tool="inspect">Inspect</button>
+          <button class="tool" data-tool="1">Food</button>
           <button class="tool" data-tool="2">Wall</button>
           <button class="tool" data-tool="0">Erase</button>
         </div>
         <p>Paint directly on the ecosystem. Painting over an organism removes it.</p>
+      </section>
+      <section class="panel observatory">
+        <div class="control-title"><h3>Evolution Observatory</h3><button id="clear-selection">Clear</button></div>
+        <div id="observation" class="observation-empty">Choose Inspect, then select a creature.</div>
       </section>
       <footer><span id="core-state">TypeScript NNUE</span><span id="ticks">0 ticks</span></footer>
     </aside>
@@ -62,7 +67,8 @@ try {
 let simulation: Simulation;
 let running = true;
 let ticksPerFrame = 2;
-let tool = CellType.Food;
+let tool: CellType | "inspect" = "inspect";
+let selectedId: number | undefined;
 
 function resize(): void {
   const bounds = canvas.getBoundingClientRect();
@@ -87,10 +93,91 @@ function render(): void {
     if (type === CellType.Empty) continue;
     context.fillStyle = CELL_COLORS[type];
     context.fillRect((index % width) * cellSize, Math.floor(index / width) * cellSize, cellSize, cellSize);
+    if (simulation.owners[index] === selectedId) {
+      context.strokeStyle = "#ffe45e";
+      context.lineWidth = 1;
+      context.strokeRect((index % width) * cellSize + 0.5, Math.floor(index / width) * cellSize + 0.5, cellSize - 1, cellSize - 1);
+    }
   }
 }
 
-function frame(): void {
+function softmax(values: readonly number[]): number[] {
+  const maximum = Math.max(...values);
+  const exponential = values.map((value) => Math.exp(value - maximum));
+  const total = exponential.reduce((sum, value) => sum + value, 0);
+  return exponential.map((value) => value / total);
+}
+
+function lineageButtons(items: { id: number; generation: number; alive: boolean }[]): string {
+  if (!items.length) return '<span class="muted">None</span>';
+  const visible = items.slice(-16);
+  const hidden = items.length - visible.length;
+  return `${hidden > 0 ? `<span class="muted">+${hidden} earlier</span>` : ""}${visible.map((item) =>
+    `<button class="lineage-node ${item.alive ? "alive" : "dead"}" data-organism-id="${item.id}">#${item.id}<small>G${item.generation}</small></button>`
+  ).join("")}`;
+}
+
+function sensoryGrid(senses: { x: number; y: number; category: number; label: string }[]): string {
+  const byPosition = new Map(senses.map((sense) => [`${sense.x},${sense.y}`, sense]));
+  let html = "";
+  for (let y = -2; y <= 2; y++) for (let x = -2; x <= 2; x++) {
+    if (x === 0 && y === 0) {
+      html += '<span class="sense center" title="Selected organism">◎</span>';
+    } else {
+      const sense = byPosition.get(`${x},${y}`);
+      html += `<span class="sense sense-${sense?.category ?? 0}" title="${sense?.label ?? "Unknown"}"></span>`;
+    }
+  }
+  return html;
+}
+
+function renderObservatory(): void {
+  const root = document.querySelector<HTMLElement>("#observation")!;
+  if (selectedId === undefined) {
+    root.className = "observation-empty";
+    root.textContent = "Choose Inspect, then select a creature.";
+    return;
+  }
+  const organism = simulation.inspect(selectedId);
+  if (!organism) {
+    selectedId = undefined;
+    root.className = "observation-empty";
+    root.textContent = "That lineage is no longer part of this world.";
+    return;
+  }
+  root.className = "";
+  const probabilities = organism.outputs ? softmax(organism.outputs) : [];
+  const actions = ["Up", "Down", "Left", "Right", "Wait"];
+  root.innerHTML = `
+    <div class="organism-heading">
+      <div><span class="label">CREATURE</span><strong>#${organism.id}</strong></div>
+      <span class="life-badge ${organism.alive ? "alive" : "dead"}">${organism.alive ? "Alive" : "Dead"}</span>
+    </div>
+    <div class="inspection-stats">
+      <span>Generation<strong>${organism.generation}</strong></span>
+      <span>Age<strong>${organism.age}</strong></span>
+      <span>Cells<strong>${organism.cells}</strong></span>
+      <span>Food<strong>${organism.food}</strong></span>
+      <span>Damage<strong>${organism.damage}</strong></span>
+      <span>Brain<strong>${organism.isMover ? "NNUE" : "Static"}</strong></span>
+    </div>
+    <h4>Ancestry</h4><div class="lineage-list">${lineageButtons(organism.ancestors)}</div>
+    <h4>Descendants <small>${organism.descendants.length}</small></h4><div class="lineage-list">${lineageButtons(organism.descendants)}</div>
+    <h4>Mutations</h4>
+    <ul class="mutation-list">${organism.mutations.length
+      ? organism.mutations.map((mutation) => `<li>${mutation}</li>`).join("")
+      : "<li class=\"muted\">No mutations from parent</li>"}</ul>
+    <div class="rates"><span>Body mutation <b>${organism.mutability.toFixed(1)}%</b></span><span>Neural mutation <b>${organism.neuralMutability.toFixed(1)}%</b></span></div>
+    <h4>Current sensory inputs</h4>
+    ${organism.senses.length ? `<div class="sensory-row"><div class="sense-grid">${sensoryGrid(organism.senses)}</div><p>Hover cells to inspect the encoded feature.</p></div>` : '<p class="muted">Static organisms have no neural inputs.</p>'}
+    <h4>Neural outputs ${organism.action ? `<small>→ ${organism.action}</small>` : ""}</h4>
+    <div class="output-list">${probabilities.length ? probabilities.map((value, index) =>
+      `<div class="${actions[index] === organism.action ? "chosen" : ""}"><span>${actions[index]}</span><i><b style="width:${(value * 100).toFixed(1)}%"></b></i><output>${(value * 100).toFixed(1)}%</output></div>`
+    ).join("") : '<p class="muted">No NNUE outputs for this organism.</p>'}</div>`;
+}
+
+let lastObservationRender = 0;
+function frame(time = 0): void {
   if (running) simulation.step(ticksPerFrame);
   render();
   const metrics = simulation.metrics();
@@ -98,6 +185,10 @@ function frame(): void {
     document.querySelector<HTMLElement>(`#${key}`)!.textContent = String(metrics[key]);
   }
   document.querySelector("#ticks")!.textContent = `${metrics.ticks.toLocaleString()} ticks`;
+  if (time - lastObservationRender > 150) {
+    renderObservatory();
+    lastObservationRender = time;
+  }
   requestAnimationFrame(frame);
 }
 
@@ -107,7 +198,10 @@ document.querySelector("#toggle")!.addEventListener("click", (event) => {
   document.querySelector("#run-state")!.textContent = running ? "Running" : "Paused";
   document.body.classList.toggle("paused", !running);
 });
-document.querySelector("#reset")!.addEventListener("click", () => simulation.reset());
+document.querySelector("#reset")!.addEventListener("click", () => {
+  simulation.reset();
+  selectedId = undefined;
+});
 document.querySelector("#seed")!.addEventListener("click", () => {
   for (let i = 0; i < 500; i++) simulation.paint(
     Math.floor(Math.random() * simulation.width),
@@ -127,11 +221,19 @@ document.querySelector<HTMLInputElement>("#food-rate")!.addEventListener("input"
 document.querySelectorAll<HTMLButtonElement>(".tool").forEach((button) => button.addEventListener("click", () => {
   document.querySelector(".tool.active")?.classList.remove("active");
   button.classList.add("active");
-  tool = Number(button.dataset.tool) as CellType;
+  tool = button.dataset.tool === "inspect" ? "inspect" : Number(button.dataset.tool) as CellType;
 }));
 canvas.addEventListener("pointerdown", (event) => {
   const bounds = canvas.getBoundingClientRect();
-  simulation.paint(Math.floor((event.clientX - bounds.left) / cellSize), Math.floor((event.clientY - bounds.top) / cellSize), tool);
+  const x = Math.floor((event.clientX - bounds.left) / cellSize);
+  const y = Math.floor((event.clientY - bounds.top) / cellSize);
+  if (tool === "inspect") selectedId = simulation.organismIdAt(x, y);
+  else simulation.paint(x, y, tool);
+});
+document.querySelector("#clear-selection")!.addEventListener("click", () => { selectedId = undefined; });
+document.querySelector("#observation")!.addEventListener("pointerdown", (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-organism-id]");
+  if (button) selectedId = Number(button.dataset.organismId);
 });
 
 window.addEventListener("resize", resize);

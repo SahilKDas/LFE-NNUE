@@ -40,4 +40,21 @@ describe("original Life Engine physics", () => {
     expect(simulation.cells[center + simulation.width + 1]).toBe(CellType.Producer);
     expect(simulation.neuralOrganismCount()).toBe(0);
   });
+
+  it("exposes the founding creature through the lineage observatory", () => {
+    const simulation = new Simulation({ width: 21, height: 21, foodChance: 0, lifespan: 100 });
+    const id = simulation.organismIdAt(10, 10);
+    expect(id).toBeDefined();
+    const inspection = simulation.inspect(id!);
+    expect(inspection).toMatchObject({
+      id,
+      generation: 0,
+      alive: true,
+      cells: 3,
+      isMover: false,
+      ancestors: [],
+      descendants: [],
+      mutations: [],
+    });
+  });
 });
