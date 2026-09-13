@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { climateAt, CLIMATE_CYCLE_TICKS, thermalStressDelta } from "./climate";
-import { CLIMATE_FEATURE_OFFSET, HIDDEN_SIZE, INPUT_SIZE, LEGACY_INPUT_SIZE, Nnue } from "./nnue";
+import { CLIMATE_FEATURE_OFFSET, HIDDEN_SIZE, INPUT_SIZE, LEGACY_INPUT_SIZE, MAX_INFERENCE_BUDGET, Nnue, SenseChannel, clampPerception } from "./nnue";
 
 describe("seasonal climate",()=>{
   it("has opposite hemispheres, a stable equator, bounded fertility, and exact wraparound",()=>{
@@ -10,6 +10,10 @@ describe("seasonal climate",()=>{
     expect(climateAt(10,101,0)).toEqual(climateAt(10,101,CLIMATE_CYCLE_TICKS));
   });
   it("accumulates stress outside comfort and recovers inside it",()=>{expect(thermalStressDelta(.05)).toBeGreaterThan(0);expect(thermalStressDelta(.5)).toBeLessThan(0);});
+});
+describe("evolvable perception",()=>{
+  it("bounds radius and clamps sensory work to the inference budget",()=>{const perception=clampPerception(99,255);expect(perception.radius).toBeGreaterThanOrEqual(1);expect(perception.radius).toBeLessThanOrEqual(4);expect(perception.cost).toBeLessThanOrEqual(MAX_INFERENCE_BUDGET);});
+  it("preserves requested channels when they fit",()=>{const mask=SenseChannel.Resources|SenseChannel.Terrain;expect(clampPerception(2,mask)).toMatchObject({radius:2,channels:mask,cost:48});});
 });
 
 describe("brain schema migration",()=>{

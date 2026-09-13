@@ -1,4 +1,4 @@
-import { CLIMATE_FEATURE_OFFSET, FEATURE_CATEGORIES, Nnue, POSITION_COUNT, SENSOR_RADIUS, type BrainSeed } from "./nnue";
+import { CLIMATE_FEATURE_OFFSET, DEFAULT_SENSOR_RADIUS, DEFAULT_SENSE_CHANNELS, FEATURE_CATEGORIES, MAX_SENSOR_RADIUS, Nnue, POSITION_COUNT, SenseChannel, STATE_FEATURE_OFFSET, clampPerception, type BrainSeed } from "./nnue";
 import { climateAt, thermalStressDelta, type ClimateSample } from "./climate";
 import { CellType, DIRECTIONS, ResourceType, TerrainType, type LocalCell, type Metrics } from "./types";
 import { generateWorld, terrainPassable, type WorldLayers } from "./world";
@@ -7,6 +7,7 @@ import { ARMOR_DURABILITY, ATTACK_COST, constructionMinerals, KILLER_DURABILITY,
 const enum Direction { Up, Down, Left, Right }
 const ENERGY_SCALE=1000, START_ENERGY=12*ENERGY_SCALE, PLANT_ENERGY=4*ENERGY_SCALE, CARRION_ENERGY=3*ENERGY_SCALE;
 const CELL_BASE_COST=2, MOVE_COST=15, PRODUCE_COST=5;
+const SENSOR_OFFSETS:[number,number][]=(()=>{const result:[number,number][]=[];for(let ring=1;ring<=MAX_SENSOR_RADIUS;ring++)for(let y=-ring;y<=ring;y++)for(let x=-ring;x<=ring;x++)if((x!==0||y!==0)&&Math.max(Math.abs(x),Math.abs(y))===ring)result.push([x,y]);return result;})();
 
 export interface LineageSummary {
   id: number;
@@ -49,6 +50,9 @@ export interface OrganismInspection {
   fertility: number;
   thermalStress: number;
   totalDescendants: number;
+  perceptionRadius:number;
+  senseChannels:number;
+  neuralCost:number;
 }
 
 interface LineageRecord {
@@ -71,6 +75,9 @@ interface LineageRecord {
   lastAction?: number;
   thermalStress: number;
   totalDescendants: number;
+  perceptionRadius:number;
+  senseChannels:number;
+  neuralCost:number;
 }
 
 interface Organism {
@@ -102,6 +109,9 @@ interface Organism {
   lastAction?: number;
   thermalStress: number;
   featureBuffer: number[];
+  perceptionRadius:number;
+  senseChannels:number;
+  neuralCost:number;
 }
 
 export interface SimulationOptions {
@@ -274,6 +284,7 @@ export class Simulation {
       season: localClimate.season, seasonPhase: localClimate.phase, temperature: localClimate.temperature,
       fertility: localClimate.fertility, thermalStress: organism?.thermalStress ?? record.thermalStress,
       totalDescendants: record.totalDescendants,
+      perceptionRadius:organism?.perceptionRadius??record.perceptionRadius,senseChannels:organism?.senseChannels??record.senseChannels,neuralCost:organism?.neuralCost??record.neuralCost,
     };
   }
 
@@ -314,7 +325,7 @@ export class Simulation {
         living: true,
         isProducer: parent.isProducer,
         isMover: parent.isMover,
-        mutations: [], thermalStress: parent.thermalStress, featureBuffer: [],
+        mutations: [], thermalStress: parent.thermalStress, featureBuffer: [], perceptionRadius:parent.perceptionRadius,senseChannels:parent.senseChannels,neuralCost:parent.neuralCost,
       };
     }
     return {
@@ -323,7 +334,7 @@ export class Simulation {
       energy: START_ENERGY, minerals: 0, lifetime: 0, damage: 0,
       mutability: 5, neuralMutability: 8, birthDistance: 4, moveRange: 4, moveCount: 0,
       direction: Direction.Up, rotation: Direction.Up,
-      living: true, isProducer: false, isMover: false, mutations: [], thermalStress: 0, featureBuffer: [],
+      living: true, isProducer: false, isMover: false, mutations: [], thermalStress: 0, featureBuffer: [], perceptionRadius:DEFAULT_SENSOR_RADIUS,senseChannels:DEFAULT_SENSE_CHANNELS,neuralCost:clampPerception(DEFAULT_SENSOR_RADIUS,DEFAULT_SENSE_CHANNELS).cost,
     };
   }
 
@@ -347,6 +358,7 @@ export class Simulation {
       else if (local.type === CellType.Killer) this.attack(organism, local, x, y);
     }
     if (!organism.living || !organism.isMover || !organism.brain) return;
+    organism.energy=Math.max(0,organism.energy-Math.ceil(organism.neuralCost/20));
     const features = this.features(organism);
     const outputs = organism.brain.evaluate(features);
     const action = this.bestAction(outputs);
@@ -421,6 +433,8 @@ export class Simulation {
       organism.birthDistance = Math.max(1, organism.birthDistance + Math.floor(Math.random() * 5) - 2);
       organism.mutations.push(`Birth distance changed to ${organism.birthDistance}`);
     }
+    if(organism.isMover&&Math.random()<.1){const next=clampPerception(organism.perceptionRadius+(Math.random()<.5?-1:1),organism.senseChannels);organism.perceptionRadius=next.radius;organism.senseChannels=next.channels;organism.neuralCost=next.cost;organism.mutations.push("Perception radius changed to "+next.radius);}
+    if(organism.isMover&&Math.random()<.1){const bit=1<<Math.floor(Math.random()*8),next=clampPerception(organism.perceptionRadius,organism.senseChannels^bit);organism.perceptionRadius=next.radius;organism.senseChannels=next.channels;organism.neuralCost=next.cost;organism.mutations.push("Sensory channel mask changed");}
     if (organism.isMover) {
       organism.brain ??= new Nnue(this.seed);
     } else {
@@ -533,9 +547,8 @@ export class Simulation {
 
   private features(organism: Organism): number[] {
     const features = organism.featureBuffer; features.length = 0;
-    let square = 0;
-    for (let dy = -SENSOR_RADIUS; dy <= SENSOR_RADIUS; dy++) for (let dx = -SENSOR_RADIUS; dx <= SENSOR_RADIUS; dx++) {
-      if (dx === 0 && dy === 0) continue;
+    const offsets=this.sensorOffsets();
+    for(let square=0;square<offsets.length;square++) { const [dx,dy]=offsets[square]!;if(Math.max(Math.abs(dx),Math.abs(dy))>organism.perceptionRadius)continue;
       const index = this.safeIndex(organism.x + dx, organism.y + dy);
       let category = 6;
       if (index >= 0) {
@@ -548,16 +561,16 @@ export class Simulation {
           neighbor?.isMover ? 7 + neighbor.direction : owner >= 0 ? 4 :
           type === CellType.Food ? 1 : type === CellType.Wall ? 2 : 0;
       }
-      features.push(square++ * FEATURE_CATEGORIES + category);
+      const mask=organism.senseChannels;
+      const enabled=category===5||category===6?(mask&SenseChannel.Danger):category>=7&&category<=10?(mask&SenseChannel.Heading):category===1?(mask&SenseChannel.Resources):(mask&SenseChannel.Occupancy);
+      if(enabled)features.push(square*FEATURE_CATEGORIES+category);
+      if(mask&SenseChannel.Resources){const resource=index>=0?this.resources[index] as ResourceType:ResourceType.None;if(resource===ResourceType.Carrion)features.push(square*FEATURE_CATEGORIES+12);else if(resource===ResourceType.Mineral)features.push(square*FEATURE_CATEGORIES+13);else if(resource===ResourceType.Plant&&category!==1)features.push(square*FEATURE_CATEGORIES+1);}
+      if(mask&SenseChannel.Terrain&&index>=0)features.push(square*FEATURE_CATEGORIES+15+(this.terrain[index] as TerrainType));
     }
-    const state = POSITION_COUNT * FEATURE_CATEGORIES;
-    features.push(state + (organism.energy >= organism.cells.length*6*ENERGY_SCALE ? 1 : 0));
-    features.push(state + 2 + (organism.damage > 0 ? 1 : 0));
-    features.push(state + 4 + organism.direction);
+    if(organism.senseChannels&SenseChannel.Internal){features.push(STATE_FEATURE_OFFSET+(organism.energy>=organism.cells.length*6*ENERGY_SCALE?1:0));features.push(STATE_FEATURE_OFFSET+2+(organism.damage>0?1:0));features.push(STATE_FEATURE_OFFSET+4+organism.direction);}
     const climate = climateAt(organism.y, this.height, this.ticks);
-    features.push(CLIMATE_FEATURE_OFFSET + climate.temperatureBand);
-    features.push(CLIMATE_FEATURE_OFFSET + 5 + climate.gradient + 1);
-    features.push(CLIMATE_FEATURE_OFFSET + 8 + Math.floor(climate.phase * 4) % 4);
+    if(organism.senseChannels&SenseChannel.Temperature){features.push(CLIMATE_FEATURE_OFFSET+climate.temperatureBand);features.push(CLIMATE_FEATURE_OFFSET+5+climate.gradient+1);}
+    if(organism.senseChannels&SenseChannel.Fertility){features.push(CLIMATE_FEATURE_OFFSET+8+Math.floor(climate.phase*4)%4);features.push(CLIMATE_FEATURE_OFFSET+12+Math.min(4,Math.floor((climate.fertility-.35)*5)));}
     return features;
   }
 
@@ -579,6 +592,7 @@ export class Simulation {
       isMover: organism.isMover,
       thermalStress: organism.thermalStress,
       totalDescendants: 0,
+      perceptionRadius:organism.perceptionRadius,senseChannels:organism.senseChannels,neuralCost:organism.neuralCost,
     });
     if (organism.parentId !== undefined) {
       this.lineage.get(organism.parentId)?.children.push(organism.id);
@@ -612,6 +626,7 @@ export class Simulation {
       record.lastOutputs = organism.lastOutputs ? [...organism.lastOutputs] : undefined;
       record.lastAction = organism.lastAction;
       record.thermalStress = organism.thermalStress;
+      record.perceptionRadius=organism.perceptionRadius;record.senseChannels=organism.senseChannels;record.neuralCost=organism.neuralCost;
       this.deadOrder.push(organism.id);
       this.pruneLineage();
     }
@@ -681,6 +696,7 @@ export class Simulation {
     return ["empty", "food", "wall", "mouth", "producer", "mover", "killer", "armor"][type] ?? "unknown";
   }
   private safeIndex(x: number, y: number): number { return x >= 0 && y >= 0 && x < this.width && y < this.height ? y * this.width + x : -1; }
+  private sensorOffsets():readonly [number,number][]{return SENSOR_OFFSETS;}
   private markDirty(index:number):void { if(this.dirtyFlags[index]===0){this.dirtyFlags[index]=1;this.dirty.push(index);} }
   private write(index: number, type: CellType, owner: number): void { this.cells[index]=type; this.owners[index]=owner; this.markDirty(index); }
   private pruneLineage(): void {

@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { CLIMATE_FEATURE_OFFSET, Nnue, POSITION_COUNT } from "../src/core/nnue";
+import { CLIMATE_FEATURE_OFFSET, FEATURE_CATEGORIES, LEGACY_POSITION_COUNT, Nnue, STATE_FEATURE_OFFSET } from "../src/core/nnue";
 
 function mulberry32(seed: number): () => number {
   return () => {
@@ -20,14 +20,14 @@ function sample(
   ownDirection = 0,
 ): number[] {
   const features: number[] = [];
-  for (let square = 0; square < POSITION_COUNT; square++) {
+  for (let square = 0; square < LEGACY_POSITION_COUNT; square++) {
     const category = square === killerSquare ? 5
       : square === foodSquare ? 1
       : square === moverSquare ? 7 + moverDirection
       : 0;
-    features.push(square * 11 + category);
+    features.push(square * FEATURE_CATEGORIES + category);
   }
-  features.push(264, 266, 268 + ownDirection);
+  features.push(STATE_FEATURE_OFFSET, STATE_FEATURE_OFFSET+2, STATE_FEATURE_OFFSET+4+ownDirection);
   return features;
 }
 
