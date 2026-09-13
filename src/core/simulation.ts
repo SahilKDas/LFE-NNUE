@@ -103,6 +103,8 @@ interface Organism {
   living: boolean;
   isProducer: boolean;
   isMover: boolean;
+  isConsumer:boolean;
+  isAttacker:boolean;
   mutations: string[];
   lastFeatures?: number[];
   lastOutputs?: number[];
@@ -156,6 +158,10 @@ export class Simulation {
   private dirtyFlags: Uint8Array;
   private readonly lineageLimit: number;
   private nnueEvaluations=0;
+  private climateTemperature:Float32Array;
+  private climateFertility:Float32Array;
+  private climateGradient:Int8Array;
+  private climateBand:Uint8Array;
 
   constructor(options: SimulationOptions, private readonly seed?: BrainSeed) {
     this.width = options.width;
@@ -169,6 +175,7 @@ export class Simulation {
     const world=generateWorld(this.width,this.height,this.worldSeed);
     this.terrain=world.terrain; this.resources=world.resources; this.resourceAmount=world.resourceAmount;
     this.dirtyFlags = new Uint8Array(this.width * this.height);
+    this.climateTemperature=new Float32Array(this.height);this.climateFertility=new Float32Array(this.height);this.climateGradient=new Int8Array(this.height);this.climateBand=new Uint8Array(this.height);
     this.reset();
   }
 
@@ -196,6 +203,7 @@ export class Simulation {
   step(count = 1): void {
     for (let iteration = 0; iteration < count; iteration++) {
       this.ticks++;
+      this.updateClimateCache();
       const count = this.active.length;
       for (let index=0;index<count;index++) this.updateOrganism(this.active[index]!);
       if(this.deathsPending){this.active=this.active.filter(organism=>{if(organism.living)return true;this.organisms.delete(organism.id);return false;});this.deathsPending=false;}
@@ -328,7 +336,7 @@ export class Simulation {
         rotation: Direction.Up,
         living: true,
         isProducer: parent.isProducer,
-        isMover: parent.isMover,
+        isMover: parent.isMover,isConsumer:parent.isConsumer,isAttacker:parent.isAttacker,
         mutations: [], thermalStress: parent.thermalStress, featureBuffer: [], perceptionRadius:parent.perceptionRadius,senseChannels:parent.senseChannels,neuralCost:parent.neuralCost,
       };
     }
@@ -338,7 +346,7 @@ export class Simulation {
       energy: START_ENERGY, minerals: 0, lifetime: 0, damage: 0,
       mutability: 5, neuralMutability: 8, birthDistance: 4, moveRange: 4, moveCount: 0,
       direction: Direction.Up, rotation: Direction.Up,
-      living: true, isProducer: false, isMover: false, mutations: [], thermalStress: 0, featureBuffer: [], perceptionRadius:DEFAULT_SENSOR_RADIUS,senseChannels:DEFAULT_SENSE_CHANNELS,neuralCost:clampPerception(DEFAULT_SENSOR_RADIUS,DEFAULT_SENSE_CHANNELS).cost,
+      living: true, isProducer: false, isMover: false,isConsumer:false,isAttacker:false,mutations: [], thermalStress: 0, featureBuffer: [], perceptionRadius:DEFAULT_SENSOR_RADIUS,senseChannels:DEFAULT_SENSE_CHANNELS,neuralCost:clampPerception(DEFAULT_SENSOR_RADIUS,DEFAULT_SENSE_CHANNELS).cost,
     };
   }
 
@@ -346,10 +354,10 @@ export class Simulation {
     if (!organism.living) return;
     organism.lifetime++;
     organism.energy-=organism.cells.length*CELL_BASE_COST;
-    const localClimate = climateAt(organism.y, this.height, this.ticks);
+    const climateRow=Math.max(0,Math.min(this.height-1,organism.y)),localTemperature=this.climateTemperature[climateRow]!,localFertility=this.climateFertility[climateRow]!;
     const homeIndex=this.safeIndex(organism.x,organism.y),homeTerrain=homeIndex>=0?this.terrain[homeIndex] as TerrainType:TerrainType.Mountain;
-    organism.energy=Math.max(0,organism.energy-climateMetabolicCost(localClimate.temperature,homeTerrain===TerrainType.Desert));
-    organism.thermalStress = Math.max(0, organism.thermalStress + thermalStressDelta(localClimate.temperature));
+    organism.energy=Math.max(0,organism.energy-climateMetabolicCost(localTemperature,homeTerrain===TerrainType.Desert));
+    organism.thermalStress = Math.max(0, organism.thermalStress + thermalStressDelta(localTemperature));
     if (organism.thermalStress >= 1) { organism.thermalStress -= 1; this.harm(organism); if (!organism.living) return; }
     if (organism.lifetime > organism.cells.length * this.lifespan) {
       this.die(organism);
@@ -357,7 +365,7 @@ export class Simulation {
     }
     if(organism.energy<=0){organism.energy=0;this.harm(organism);if(!organism.living)return;}
     if (organism.energy >= organism.cells.length*6*ENERGY_SCALE) this.reproduce(organism);
-    for (const local of organism.cells) {
+    if(organism.isConsumer||organism.isProducer||organism.isAttacker)for (const local of organism.cells) {
       const [x, y] = this.realLocation(organism, local);
       if (local.type === CellType.Mouth || local.type===CellType.PlantMouth || local.type===CellType.ScavengerMouth || local.type===CellType.MineralMouth) this.eat(organism,local.type,x,y);
       else if (local.type === CellType.Producer) this.produce(organism, x, y);
@@ -454,6 +462,8 @@ export class Simulation {
   private refreshCapabilities(organism: Organism): void {
     organism.isProducer = organism.cells.some((cell) => cell.type === CellType.Producer);
     organism.isMover = organism.cells.some((cell) => cell.type === CellType.Mover);
+    organism.isConsumer=organism.cells.some(cell=>cell.type===CellType.Mouth||cell.type===CellType.PlantMouth||cell.type===CellType.ScavengerMouth||cell.type===CellType.MineralMouth);
+    organism.isAttacker=organism.cells.some(cell=>cell.type===CellType.Killer&&!!cell.durability);
     if (organism.isMover) organism.brain ??= new Nnue(this.seed);
     else organism.brain = undefined;
   }
@@ -474,7 +484,8 @@ export class Simulation {
 
   private produce(organism: Organism, x: number, y: number): void {
     const origin=this.safeIndex(x,y),biome=origin>=0?this.terrain[origin] as TerrainType:TerrainType.Water;
-    if ((organism.isMover && !this.moversCanProduce) || organism.energy<PRODUCE_COST || Math.random() >= this.foodChance * climateAt(y, this.height, this.ticks).fertility*terrainProductivity(biome)) return;
+    const fertility=this.climateFertility[Math.max(0,Math.min(this.height-1,y))]!;
+    if ((organism.isMover && !this.moversCanProduce) || organism.energy<PRODUCE_COST || Math.random() >= this.foodChance * fertility*terrainProductivity(biome)) return;
     const [dx, dy] = DIRECTIONS[Math.floor(Math.random() * 4)]!;
     const index = this.safeIndex(x + dx, y + dy);
     if(index>=0&&terrainPassable(this.terrain[index] as TerrainType)){organism.energy-=PRODUCE_COST;this.resources[index]=ResourceType.Plant;this.resourceAmount[index]=Math.min(65535,this.resourceAmount[index]!+50);this.markDirty(index);}
@@ -571,9 +582,9 @@ export class Simulation {
       if(mask&SenseChannel.Terrain&&index>=0)features.push(square*FEATURE_CATEGORIES+15+(this.terrain[index] as TerrainType));
     }
     if(organism.senseChannels&SenseChannel.Internal){features.push(STATE_FEATURE_OFFSET+(organism.energy>=organism.cells.length*6*ENERGY_SCALE?1:0));features.push(STATE_FEATURE_OFFSET+2+(organism.damage>0?1:0));features.push(STATE_FEATURE_OFFSET+4+organism.direction);}
-    const climate = climateAt(organism.y, this.height, this.ticks);
-    if(organism.senseChannels&SenseChannel.Temperature){features.push(CLIMATE_FEATURE_OFFSET+climate.temperatureBand);features.push(CLIMATE_FEATURE_OFFSET+5+climate.gradient+1);}
-    if(organism.senseChannels&SenseChannel.Fertility){features.push(CLIMATE_FEATURE_OFFSET+8+Math.floor(climate.phase*4)%4);features.push(CLIMATE_FEATURE_OFFSET+12+Math.min(4,Math.floor((climate.fertility-.35)*5)));}
+    const row=Math.max(0,Math.min(this.height-1,organism.y));
+    if(organism.senseChannels&SenseChannel.Temperature){features.push(CLIMATE_FEATURE_OFFSET+this.climateBand[row]!);features.push(CLIMATE_FEATURE_OFFSET+5+this.climateGradient[row]!+1);}
+    if(organism.senseChannels&SenseChannel.Fertility){features.push(CLIMATE_FEATURE_OFFSET+8+Math.floor((this.ticks%24000)/6000)%4);features.push(CLIMATE_FEATURE_OFFSET+12+Math.min(4,Math.floor((this.climateFertility[row]!-.35)*5)));}
     return features;
   }
 
@@ -700,6 +711,7 @@ export class Simulation {
     return ["empty", "food", "wall", "mouth", "producer", "mover", "killer", "armor"][type] ?? "unknown";
   }
   private safeIndex(x: number, y: number): number { return x >= 0 && y >= 0 && x < this.width && y < this.height ? y * this.width + x : -1; }
+  private updateClimateCache():void { for(let y=0;y<this.height;y++){const sample=climateAt(y,this.height,this.ticks);this.climateTemperature[y]=sample.temperature;this.climateFertility[y]=sample.fertility;this.climateGradient[y]=sample.gradient;this.climateBand[y]=sample.temperatureBand;} }
   private sensorOffsets():readonly [number,number][]{return SENSOR_OFFSETS;}
   private markDirty(index:number):void { if(this.dirtyFlags[index]===0){this.dirtyFlags[index]=1;this.dirty.push(index);} }
   private write(index: number, type: CellType, owner: number): void { this.cells[index]=type; this.owners[index]=owner; this.markDirty(index); }
