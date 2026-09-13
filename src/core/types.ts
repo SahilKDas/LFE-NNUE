@@ -7,7 +7,14 @@ export const enum CellType {
   Mover,
   Killer,
   Armor,
+  PlantMouth,
+  ScavengerMouth,
+  MineralMouth,
+  Inert,
 }
+
+export const enum TerrainType { Plains, Fertile, Desert, Water, Mountain }
+export const enum ResourceType { None, Plant, Carrion, Mineral }
 
 export interface LocalCell {
   type: CellType;
@@ -40,4 +47,8 @@ export const CELL_COLORS: Record<CellType, string> = {
   [CellType.Mover]: "#3493eb",
   [CellType.Killer]: "red",
   [CellType.Armor]: "purple",
+  [CellType.PlantMouth]: "#ff9f43",
+  [CellType.ScavengerMouth]: "#d67c4a",
+  [CellType.MineralMouth]: "#d6c36a",
+  [CellType.Inert]: "#59636f",
 };
