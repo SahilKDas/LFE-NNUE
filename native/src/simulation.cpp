@@ -49,13 +49,20 @@ int NativeSimulation::seedBenchmarkMovers(int count) {
   organisms_.clear();slotById_.clear();ticks_=0;record_=largest_=nnueEvaluations_=deadCount_=0;selectedId_=-1;
   auto sharedBrain=std::make_shared<Nnue>(random_);
   organisms_.reserve(std::max<size_t>(organisms_.capacity(),size_t(count)));
-  for(int index=0;index<width_*height_&&int(organisms_.size())<count;++index){
-    const auto terrain=TerrainType(world.terrain[index]);
-    if(terrain==TerrainType::Water||terrain==TerrainType::Mountain)continue;
-    Organism organism;organism.id=nextId_++;organism.x=index%width_;organism.y=index/width_;organism.cells={{CellType::Mover,0,0,0}};organism.isMover=true;organism.brain=sharedBrain;organism.energy=1'000'000'000;
-    organisms_.push_back(std::move(organism));slotById_[organisms_.back().id]=organisms_.size()-1;placeBody(organisms_.back());
+  constexpr std::array<uint8_t,4> channelPatterns{DefaultSenseChannels,255,uint8_t(Occupancy|Danger|Resources),uint8_t(Heading|Temperature|Fertility|Internal)};
+  int candidate=0;
+  for(int y=2;y<height_-2&&int(organisms_.size())<count;y+=3)for(int x=2;x<width_-2&&int(organisms_.size())<count;x+=3,++candidate){
+    Organism organism;organism.id=nextId_++;organism.x=x;organism.y=y;organism.energy=1'000'000'000;organism.minerals=10'000;organism.brain=sharedBrain;
+    organism.cells.push_back({CellType::Mover,0,0,0});
+    const CellType diet=candidate%3==0?CellType::PlantMouth:candidate%3==1?CellType::ScavengerMouth:CellType::MineralMouth;organism.cells.push_back({diet,1,0,0});
+    if(candidate%4==0)organism.cells.push_back({CellType::Killer,-1,0,KillerDurability});
+    if(candidate%5==0)organism.cells.push_back({CellType::Armor,0,1,ArmorDurability});
+    if(candidate%7==0)organism.cells.push_back({CellType::Producer,0,-1,0});
+    const auto perception=clampPerception(1+candidate%4,channelPatterns[candidate%channelPatterns.size()]);organism.perceptionRadius=perception.radius;organism.senseChannels=perception.channels;organism.neuralCost=perception.cost;refreshCapabilities(organism);
+    if(!isClear(organism,x,y,0))continue;
+    largest_=std::max(largest_,int(organism.cells.size()));organisms_.push_back(std::move(organism));slotById_[organisms_.back().id]=organisms_.size()-1;placeBody(organisms_.back());
   }
-  record_=int(organisms_.size());largest_=organisms_.empty()?0:1;updateClimateCache();return int(organisms_.size());
+  record_=int(organisms_.size());updateClimateCache();return int(organisms_.size());
 }
 
 bool NativeSimulation::paintTerrain(int x, int y, TerrainType terrain) {
@@ -126,7 +133,7 @@ void NativeSimulation::produce(Organism& organism, int x, int y) {
 Organism* NativeSimulation::organismById(int id){const auto found=slotById_.find(id);return found==slotById_.end()?nullptr:&organisms_[found->second];}
 const Organism* NativeSimulation::organismById(int id) const {const auto found=slotById_.find(id);return found==slotById_.end()?nullptr:&organisms_[found->second];}
 BodyCell* NativeSimulation::localCellAt(Organism& organism,int x,int y){for(auto& cell:organism.cells){const auto [rx,ry]=rotated(cell.x,cell.y,organism.rotation);if(organism.x+rx==x&&organism.y+ry==y)return &cell;}return nullptr;}
-void NativeSimulation::harm(Organism& organism){++organism.damage;if(organism.damage>=int(organism.cells.size()))die(organism);}
+void NativeSimulation::harm(Organism& organism){++organism.damage;if(mortalityEnabled_&&organism.damage>=int(organism.cells.size()))die(organism);}
 void NativeSimulation::harmAt(Organism& organism,int index){if(CellType(cells[index])==CellType::Armor){auto* armor=localCellAt(organism,index%width_,index/width_);if(armor&&armor->durability){--armor->durability;if(armor->durability<=0){armor->type=CellType::Inert;cells[index]=uint8_t(CellType::Inert);refreshCapabilities(organism);}return;}}harm(organism);}
 void NativeSimulation::attack(Organism& attacker,BodyCell& weapon,int x,int y){if(!weapon.durability)return;for(const auto& [dx,dy]:directions){const int index=safeIndex(x+dx,y+dy);if(index<0||CellType(cells[index])==CellType::Armor)continue;auto* victim=organismById(owners[index]);if(!victim||victim==&attacker||!victim->living)continue;const bool mutual=CellType(cells[index])==CellType::Killer;if(attacker.energy<AttackCost)return;attacker.energy-=AttackCost;--weapon.durability;const int before=victim->damage;harmAt(*victim,index);if(victim->damage>before)attacker.energy+=240;if(mutual)harm(attacker);if(weapon.durability<=0){weapon.type=CellType::Inert;const int origin=safeIndex(x,y);if(origin>=0)cells[origin]=uint8_t(CellType::Inert);refreshCapabilities(attacker);return;}}}
 bool NativeSimulation::isClear(const Organism& organism,int x,int y,int rotation) const {
