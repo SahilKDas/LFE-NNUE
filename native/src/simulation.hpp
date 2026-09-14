@@ -24,6 +24,7 @@ struct Organism {
   std::vector<uint16_t> lastFeatures;
   std::array<float,OutputSize> lastOutputs{};
   int lastAction{-1};
+  size_t activeIndex{};
   std::shared_ptr<Nnue> brain;
 };
 
@@ -51,6 +52,7 @@ class NativeSimulation {
   double foodChance_; int lifespan_, lineageLimit_, nnueEvaluations_{}; std::vector<Organism> organisms_;
   bool reproductionEnabled_{true}, mortalityEnabled_{true};
   std::unordered_map<int,size_t> slotById_;
+  std::vector<int> activeIds_;
   std::vector<float> climateTemperature_, climateFertility_; std::vector<int8_t> climateGradient_; std::vector<uint8_t> climateBand_;
   int safeIndex(int x, int y) const;
   std::pair<int,int> rotated(int x, int y, int direction) const;
