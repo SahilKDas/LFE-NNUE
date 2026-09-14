@@ -20,7 +20,6 @@ public:
   using Surface = void*; using Canvas = void*; using Paint = void*;
   Surface (__cdecl *surfaceNewRasterDirect)(const ImageInfo*, void*, size_t, void*, void*, void*);
   Canvas (__cdecl *surfaceGetCanvas)(Surface);
-  void (__cdecl *surfaceFlush)(Surface);
   void (__cdecl *surfaceUnref)(Surface);
   void (__cdecl *canvasClear)(Canvas, uint32_t);
   void (__cdecl *canvasDrawRect)(Canvas, const Rect*, Paint);
@@ -33,7 +32,6 @@ public:
     if (!library) throw std::runtime_error("libSkiaSharp.dll");
     surfaceNewRasterDirect = symbol<decltype(surfaceNewRasterDirect)>("sk_surface_new_raster_direct");
     surfaceGetCanvas = symbol<decltype(surfaceGetCanvas)>("sk_surface_get_canvas");
-    surfaceFlush = symbol<decltype(surfaceFlush)>("sk_surface_flush");
     surfaceUnref = symbol<decltype(surfaceUnref)>("sk_surface_unref");
     canvasClear = symbol<decltype(canvasClear)>("sk_canvas_clear");
     canvasDrawRect = symbol<decltype(canvasDrawRect)>("sk_canvas_draw_rect");

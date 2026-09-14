@@ -52,7 +52,7 @@ void render(HWND window, HDC dc) {
     }
   rectangle(canvas, paint, width - aside + 14, 190, width - 14, 455, 0xfff6f7fb);
   rectangle(canvas, paint, width - aside + 14, 470, width - 14, height - 14, 0xfff6f7fb);
-  api->paintDelete(paint); api->surfaceFlush(surface); api->surfaceUnref(surface);
+  api->paintDelete(paint); api->surfaceUnref(surface);
   StretchDIBits(dc, 0, 0, width, height, 0, 0, width, height, pixels.data(), &bitmap, DIB_RGB_COLORS, SRCCOPY);
 }
 
