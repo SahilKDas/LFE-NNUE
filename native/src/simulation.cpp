@@ -31,6 +31,38 @@ void NativeSimulation::reset() {
   organism.cells={{CellType::Mouth,0,0,0},{CellType::Producer,-1,-1,0},{CellType::Producer,1,1,0}};
   refreshCapabilities(organism);largest_=std::max(largest_,int(organism.cells.size()));organisms_.push_back(std::move(organism));slotById_[organisms_.back().id]=organisms_.size()-1;placeBody(organisms_.back());
 }
+
+void NativeSimulation::regenerate(uint32_t seed) {
+  worldSeed_ = seed;
+  world = generateWorld(width_, height_, worldSeed_);
+  reset();
+}
+
+bool NativeSimulation::paintTerrain(int x, int y, TerrainType terrain) {
+  const int index = safeIndex(x, y);
+  if (index < 0 || owners[index] >= 0) return false;
+  world.terrain[index] = uint8_t(terrain);
+  if (terrain == TerrainType::Water || terrain == TerrainType::Mountain) {
+    world.resources[index] = uint8_t(ResourceType::None);
+    world.resourceAmount[index] = 0;
+  }
+  return true;
+}
+
+bool NativeSimulation::paintResource(int x, int y, ResourceType resource, uint16_t amount) {
+  const int index = safeIndex(x, y);
+  if (index < 0 || owners[index] >= 0) return false;
+  const auto terrain = TerrainType(world.terrain[index]);
+  if (terrain == TerrainType::Water || terrain == TerrainType::Mountain) return false;
+  world.resources[index] = uint8_t(resource);
+  world.resourceAmount[index] = resource == ResourceType::None ? 0 : amount;
+  return true;
+}
+
+const Organism* NativeSimulation::organismAt(int x, int y) const {
+  const int index = safeIndex(x, y);
+  return index < 0 ? nullptr : organismById(owners[index]);
+}
 void NativeSimulation::eat(Organism& organism, CellType mouth, int x, int y) {
   for(const auto [dx,dy]:directions){const int index=safeIndex(x+dx,y+dy);if(index<0)continue;const auto resource=ResourceType(world.resources[index]);
     const bool compatible=((mouth==CellType::Mouth||mouth==CellType::PlantMouth)&&resource==ResourceType::Plant)||(mouth==CellType::ScavengerMouth&&resource==ResourceType::Carrion)||(mouth==CellType::MineralMouth&&resource==ResourceType::Mineral);

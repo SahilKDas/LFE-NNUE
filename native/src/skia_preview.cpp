@@ -5,6 +5,8 @@
 #include "simulation.hpp"
 #include "skia_api.hpp"
 #include <algorithm>
+#include <array>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -25,6 +27,17 @@ float zoom = 1.0f, cameraX = 0.0f, cameraY = 0.0f;
 bool dragging = false;
 POINT dragOrigin{};
 float dragCameraX{}, dragCameraY{};
+enum class Tool { Inspect, Pan, Plant, Carrion, Mineral, Fertile, Desert, Water, Mountain };
+Tool activeTool = Tool::Inspect;
+bool paused = false;
+int requestedTps = 60;
+int selectedId = -1;
+double measuredTps = 0.0, measuredFps = 0.0;
+uint64_t measuredTicks = 0, measuredFrames = 0;
+auto measurementStart = std::chrono::steady_clock::now();
+auto lastSimulationUpdate = measurementStart;
+auto lastRenderRequest = measurementStart;
+double tickAccumulator = 0.0;
 
 constexpr uint32_t terrainColors[] = {0xff2e4330, 0xff2b5b36, 0xff6c5232, 0xff1a3e5f, 0xff4d525a};
 constexpr uint32_t resourceColors[] = {0, 0xff18b437, 0xff8b4b32, 0xffd7bd52};
@@ -84,6 +97,35 @@ void rectangle(life::skia::Api::Canvas canvas, life::skia::Api::Paint paint,
 
 void text(life::skia::Api::Canvas canvas,life::skia::Api::Paint paint,const std::string& value,float x,float y,float size,uint32_t color,bool bold=false){auto font=api->fontNew(bold?boldTypeface:regularTypeface,size,1,0);const int count=api->fontTextToGlyphs(font,value.data(),value.size(),0,nullptr,0);if(count>0){std::vector<uint16_t> glyphs(count);api->fontTextToGlyphs(font,value.data(),value.size(),0,glyphs.data(),count);auto builder=api->textBlobBuilderNew();life::skia::RunBuffer run{};api->textBlobBuilderAllocRun(builder,font,count,0,0,nullptr,&run);std::memcpy(run.glyphs,glyphs.data(),glyphs.size()*sizeof(uint16_t));auto blob=api->textBlobBuilderMake(builder);api->paintSetColor(paint,color);api->paintSetAntialias(paint,true);api->canvasDrawTextBlob(canvas,blob,x,y,paint);api->textBlobUnref(blob);api->textBlobBuilderDelete(builder);}api->fontDelete(font);}
 
+const life::Organism* selectedOrganism() {
+  if (selectedId < 0) return nullptr;
+  const auto& organisms = simulation.organisms();
+  const auto found = std::find_if(organisms.begin(), organisms.end(), [](const life::Organism& organism) {
+    return organism.id == selectedId && organism.living;
+  });
+  return found == organisms.end() ? nullptr : &*found;
+}
+
+std::pair<int,int> screenToWorld(int screenX, int screenY) {
+  return {int((screenX-cameraX)/zoom), int((screenY-82-cameraY)/zoom)};
+}
+
+void applyTool(int screenX, int screenY) {
+  const auto [x,y] = screenToWorld(screenX, screenY);
+  if (x < 0 || y < 0 || x >= life::WorldWidth || y >= life::WorldHeight) return;
+  switch (activeTool) {
+    case Tool::Inspect: { const auto* organism=simulation.organismAt(x,y); selectedId=organism?organism->id:-1; break; }
+    case Tool::Plant: simulation.paintResource(x,y,life::ResourceType::Plant); break;
+    case Tool::Carrion: simulation.paintResource(x,y,life::ResourceType::Carrion); break;
+    case Tool::Mineral: simulation.paintResource(x,y,life::ResourceType::Mineral); break;
+    case Tool::Fertile: simulation.paintTerrain(x,y,life::TerrainType::Fertile); break;
+    case Tool::Desert: simulation.paintTerrain(x,y,life::TerrainType::Desert); break;
+    case Tool::Water: simulation.paintTerrain(x,y,life::TerrainType::Water); break;
+    case Tool::Mountain: simulation.paintTerrain(x,y,life::TerrainType::Mountain); break;
+    case Tool::Pan: break;
+  }
+}
+
 void render(HWND window, HDC dc) {
   RECT client{}; GetClientRect(window, &client);
   const int width = std::max(1L, client.right), height = std::max(1L, client.bottom);
@@ -109,28 +151,43 @@ void render(HWND window, HDC dc) {
     for (int row = 0; row < 2; ++row) {
       const float left=panelX+column*(cardWidth+cardGap),top=15+row*76;rectangle(canvas,paint,left,top,left+cardWidth,top+68,0xffe1e3ec);
     }
-  const auto metrics=simulation.metrics();const char* seasons[]={"Spring","Summer","Autumn","Winter"};const int season=int(std::floor(life::cyclePhase(metrics.ticks)*4))%4;const std::string values[]={std::to_string(metrics.organisms),"60","60",seasons[season]};const char* labels[]={"ORGANISMS","ACTUAL TPS","RENDER FPS","SEASON"};for(int i=0;i<4;++i){const float left=panelX+(i%2)*(cardWidth+cardGap),top=15+(i/2)*76;text(canvas,paint,labels[i],left+15,top+22,9,0xff416788);text(canvas,paint,values[i],left+15,top+53,26,0xff121d29,true);}
-  float top=179;rectangle(canvas,paint,panelX,top,panelRight,top+220,0xffe1e3ec);text(canvas,paint,"Simulation",panelX+20,top+35,16,0xff121d29,true);rectangle(canvas,paint,panelRight-77,top+15,panelRight-20,top+48,0xff9099c2);text(canvas,paint,"Pause",panelRight-65,top+36,12,0xff000000,true);text(canvas,paint,"Requested simulation TPS",panelX+20,top+76,12,0xff3a4b68);text(canvas,paint,"60",panelRight-40,top+76,12,0xff416788);rectangle(canvas,paint,panelX+20,top+95,panelRight-20,top+99,0xff416788);text(canvas,paint,"Overlay",panelX+20,top+130,12,0xff3a4b68);rectangle(canvas,paint,panelX+20,top+145,panelRight-20,top+180,0xffd5d8e4);text(canvas,paint,"Terrain",panelX+30,top+168,12,0xff121d29);
-  top=411;rectangle(canvas,paint,panelX,top,panelRight,top+162,0xffe1e3ec);text(canvas,paint,"World tools",panelX+20,top+35,16,0xff121d29,true);const char* tools[]={"Inspect","Pan","Plant","Carrion","Mineral","Fertile","Desert","Water","Mountain"};for(int i=0;i<9;++i){const int row=i/5,column=i%5;const float buttonWidth=(aside-70)/5,left=panelX+20+column*(buttonWidth+5),buttonTop=top+52+row*38;rectangle(canvas,paint,left,buttonTop,left+buttonWidth,buttonTop+31,i==0?0xff81d2c7:0xff9099c2);text(canvas,paint,tools[i],left+5,buttonTop+20,9,0xff111111,true);}
-  top=585;rectangle(canvas,paint,panelX,top,panelRight,float(height-15),0xffe1e3ec);text(canvas,paint,"Evolution Observatory",panelX+20,top+35,16,0xff121d29,true);text(canvas,paint,"Select a creature.",panelX+20,top+68,12,0xff66738a);
+  const auto metrics=simulation.metrics();const char* seasons[]={"Spring","Summer","Autumn","Winter"};const int season=int(std::floor(life::cyclePhase(metrics.ticks)*4))%4;std::ostringstream tpsText,fpsText;tpsText<<std::fixed<<std::setprecision(1)<<measuredTps;fpsText<<std::fixed<<std::setprecision(1)<<measuredFps;const std::string values[]={std::to_string(metrics.organisms),tpsText.str(),fpsText.str(),seasons[season]};const char* labels[]={"ORGANISMS","ACTUAL TPS","RENDER FPS","SEASON"};for(int i=0;i<4;++i){const float left=panelX+(i%2)*(cardWidth+cardGap),top=15+(i/2)*76;text(canvas,paint,labels[i],left+15,top+22,9,0xff416788);text(canvas,paint,values[i],left+15,top+53,26,0xff121d29,true);}
+  float top=179;rectangle(canvas,paint,panelX,top,panelRight,top+220,0xffe1e3ec);text(canvas,paint,"Simulation",panelX+20,top+35,16,0xff121d29,true);rectangle(canvas,paint,panelRight-77,top+15,panelRight-20,top+48,0xff9099c2);text(canvas,paint,paused?"Resume":"Pause",panelRight-(paused?69:65),top+36,12,0xff000000,true);text(canvas,paint,"Requested simulation TPS",panelX+20,top+76,12,0xff3a4b68);text(canvas,paint,std::to_string(requestedTps),panelRight-43,top+76,12,0xff416788);rectangle(canvas,paint,panelX+20,top+95,panelRight-20,top+99,0xff416788);const float thumbX=panelX+20+(panelRight-panelX-40)*(requestedTps-1)/119.0f;rectangle(canvas,paint,thumbX-4,top+90,thumbX+4,top+104,0xff81d2c7);text(canvas,paint,"Reset world",panelX+20,top+130,12,0xff3a4b68);rectangle(canvas,paint,panelX+20,top+145,panelRight-20,top+180,0xffd5d8e4);text(canvas,paint,"Regenerate from seed",panelX+30,top+168,12,0xff121d29);
+  top=411;rectangle(canvas,paint,panelX,top,panelRight,top+162,0xffe1e3ec);text(canvas,paint,"World tools",panelX+20,top+35,16,0xff121d29,true);const char* tools[]={"Inspect","Pan","Plant","Carrion","Mineral","Fertile","Desert","Water","Mountain"};for(int i=0;i<9;++i){const int row=i/5,column=i%5;const float buttonWidth=(aside-70)/5,left=panelX+20+column*(buttonWidth+5),buttonTop=top+52+row*38;rectangle(canvas,paint,left,buttonTop,left+buttonWidth,buttonTop+31,i==int(activeTool)?0xff81d2c7:0xff9099c2);text(canvas,paint,tools[i],left+5,buttonTop+20,9,0xff111111,true);}
+  top=585;rectangle(canvas,paint,panelX,top,panelRight,float(height-15),0xffe1e3ec);text(canvas,paint,"Evolution Observatory",panelX+20,top+35,16,0xff121d29,true);if(const auto* organism=selectedOrganism()){std::ostringstream identity,energy,traits,brain;identity<<"Creature #"<<organism->id<<"  Generation "<<organism->generation;energy<<"Energy "<<organism->energy<<"   Minerals "<<organism->minerals<<"   Age "<<organism->lifetime;traits<<"Body "<<organism->cells.size()<<"   Damage "<<organism->damage<<"   Stress "<<std::fixed<<std::setprecision(2)<<organism->thermalStress;brain<<"Perception "<<organism->perceptionRadius<<"   Neural cost "<<organism->neuralCost;text(canvas,paint,identity.str(),panelX+20,top+68,13,0xff121d29,true);text(canvas,paint,energy.str(),panelX+20,top+94,11,0xff3a4b68);text(canvas,paint,traits.str(),panelX+20,top+118,11,0xff3a4b68);text(canvas,paint,brain.str(),panelX+20,top+142,11,0xff3a4b68);}else{text(canvas,paint,"Select a creature.",panelX+20,top+68,12,0xff66738a);}
   rectangle(canvas,paint,24,float(height-52),320,float(height-20),0xee121d29);text(canvas,paint,"Terrain + resources + evolving organisms",38,float(height-31),11,0xffffffff);
   api->paintDelete(paint);api->surfaceUnref(surface);
   StretchDIBits(dc, 0, 0, width, height, 0, 0, width, height, pixels.data(), &bitmap, DIB_RGB_COLORS, SRCCOPY);
+  ++measuredFrames;
 }
 
 LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
   if (message == WM_PAINT) { PAINTSTRUCT paint{}; HDC dc = BeginPaint(window, &paint); render(window, dc); EndPaint(window, &paint); return 0; }
   if (message == WM_SIZE) { InvalidateRect(window, nullptr, FALSE); return 0; }
-  if (message == WM_TIMER) { simulation.step(); InvalidateRect(window, nullptr, FALSE); return 0; }
+  if (message == WM_TIMER) {
+    const auto now=std::chrono::steady_clock::now();
+    const double elapsed=std::chrono::duration<double>(now-lastSimulationUpdate).count();lastSimulationUpdate=now;
+    if(!paused){tickAccumulator+=elapsed*requestedTps;const int steps=std::min(16,int(tickAccumulator));if(steps>0){simulation.step(steps);tickAccumulator-=steps;measuredTicks+=steps;}}
+    const double sampleSeconds=std::chrono::duration<double>(now-measurementStart).count();if(sampleSeconds>=1.0){measuredTps=measuredTicks/sampleSeconds;measuredFps=measuredFrames/sampleSeconds;measuredTicks=measuredFrames=0;measurementStart=now;}
+    if(std::chrono::duration<double>(now-lastRenderRequest).count()>=1.0/60.0){InvalidateRect(window,nullptr,FALSE);lastRenderRequest=now;}return 0;
+  }
   if (message == WM_LBUTTONDOWN || message == WM_MBUTTONDOWN) {
-    dragging = true; dragOrigin = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
-    dragCameraX = cameraX; dragCameraY = cameraY; SetCapture(window); return 0;
+    const int mouseX=GET_X_LPARAM(lParam),mouseY=GET_Y_LPARAM(lParam);RECT client{};GetClientRect(window,&client);const float aside=std::min(390.0f,client.right*.32f),contentRight=client.right-aside,panelX=contentRight+15,panelRight=client.right-15;
+    if(message==WM_LBUTTONDOWN&&mouseX>=contentRight){
+      if(mouseY>=194&&mouseY<=227&&mouseX>=panelRight-77&&mouseX<=panelRight-20){paused=!paused;tickAccumulator=0;}
+      else if(mouseY>=269&&mouseY<=288&&mouseX>=panelX+20&&mouseX<=panelRight-20){requestedTps=std::clamp(1+int((mouseX-(panelX+20))*119/std::max(1.0f,panelRight-panelX-40)),1,120);}
+      else if(mouseY>=324&&mouseY<=359&&mouseX>=panelX+20&&mouseX<=panelRight-20){simulation.regenerate(uint32_t(simulation.metrics().ticks+simulation.metrics().record+1));selectedId=-1;}
+      else if(mouseY>=463&&mouseY<=570){const float buttonWidth=(aside-70)/5;const int row=(mouseY-463)/38,column=int((mouseX-(panelX+20))/(buttonWidth+5));const int tool=row*5+column;if(column>=0&&column<5&&tool>=0&&tool<9)activeTool=Tool(tool);}
+      InvalidateRect(window,nullptr,FALSE);return 0;
+    }
+    if(mouseY>=82&&mouseX<contentRight){if(message==WM_MBUTTONDOWN||activeTool==Tool::Pan){dragging=true;dragOrigin={mouseX,mouseY};dragCameraX=cameraX;dragCameraY=cameraY;SetCapture(window);}else applyTool(mouseX,mouseY);InvalidateRect(window,nullptr,FALSE);}return 0;
   }
   if (message == WM_MOUSEMOVE && dragging) {
     cameraX = dragCameraX + GET_X_LPARAM(lParam) - dragOrigin.x;
     cameraY = dragCameraY + GET_Y_LPARAM(lParam) - dragOrigin.y;
     InvalidateRect(window, nullptr, FALSE); return 0;
   }
+  if(message==WM_MOUSEMOVE&&(wParam&MK_LBUTTON)&&!dragging&&activeTool!=Tool::Inspect&&activeTool!=Tool::Pan){applyTool(GET_X_LPARAM(lParam),GET_Y_LPARAM(lParam));InvalidateRect(window,nullptr,FALSE);return 0;}
   if (message == WM_LBUTTONUP || message == WM_MBUTTONUP) { dragging = false; ReleaseCapture(); return 0; }
   if (message == WM_MOUSEWHEEL) {
     POINT cursor{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)}; ScreenToClient(window, &cursor);
@@ -154,7 +211,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int show) {
   HWND window = CreateWindowExW(0, type.lpszClassName, L"Life Engine NNUE — Native Skia Preview",
     WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 1500, 900, nullptr, nullptr, instance, nullptr);
   ShowWindow(window, show);
-  SetTimer(window, 1, 16, nullptr);
+  SetTimer(window, 1, 8, nullptr);
   MSG message{}; while (GetMessageW(&message, nullptr, 0, 0) > 0) { TranslateMessage(&message); DispatchMessageW(&message); }
   if(regularTypeface)api->typefaceUnref(regularTypeface);if(boldTypeface)api->typefaceUnref(boldTypeface);if(fontManager)api->fontManagerUnref(fontManager);api.reset(); return int(message.wParam);
 }

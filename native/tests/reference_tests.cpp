@@ -38,6 +38,12 @@ int main() {
   const double expectedOutputs[] = {0.023251008242368698, -0.02539653144776821, 0.07016514986753464, -0.05609821155667305, 0.008624186739325523};
   for (int index = 0; index < life::OutputSize; ++index) near(outputs[index], expectedOutputs[index], 1e-7, "NNUE output mismatch");
   check(brain.action(features) == 2, "NNUE action mismatch");
+  life::NativeSimulation editable(32,20,.2,500,41,91);
+  int editableIndex=-1;
+  for(int index=0;index<int(editable.owners.size());++index)if(editable.owners[index]<0&&life::TerrainType(editable.world.terrain[index])!=life::TerrainType::Water&&life::TerrainType(editable.world.terrain[index])!=life::TerrainType::Mountain){editableIndex=index;break;}
+  check(editableIndex>=0,"editable terrain cell unavailable");
+  if(editableIndex>=0){const int x=editableIndex%32,y=editableIndex/32;check(editable.paintTerrain(x,y,life::TerrainType::Desert),"terrain painting failed");check(life::TerrainType(editable.world.terrain[editableIndex])==life::TerrainType::Desert,"terrain paint did not persist");check(editable.paintResource(x,y,life::ResourceType::Mineral,777),"resource painting failed");check(life::ResourceType(editable.world.resources[editableIndex])==life::ResourceType::Mineral&&editable.world.resourceAmount[editableIndex]==777,"resource paint did not persist");}
+  const auto priorTerrain=editable.world.terrain;editable.regenerate(42);check(editable.metrics().ticks==0&&editable.metrics().organisms==1,"regeneration did not reset simulation");check(editable.world.terrain!=priorTerrain,"regeneration seed did not replace terrain");check(editable.organismAt(16,10)!=nullptr,"organism inspection lookup failed");
   life::NativeSimulation simulation(96,60,.2,500,524114809,334462);
   check(simulation.metrics().organisms==1&&simulation.metrics().averageEnergy==12.0,"native reset state mismatch");
   simulation.step();

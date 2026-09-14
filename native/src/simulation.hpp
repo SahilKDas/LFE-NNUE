@@ -57,6 +57,10 @@ public:
   std::vector<int32_t> owners;
   NativeSimulation(int width, int height, double foodChance, int lifespan, uint32_t worldSeed, uint32_t randomSeed);
   void reset();
+  void regenerate(uint32_t seed);
+  bool paintTerrain(int x, int y, TerrainType terrain);
+  bool paintResource(int x, int y, ResourceType resource, uint16_t amount = 1000);
+  const Organism* organismAt(int x, int y) const;
   void step(int count = 1);
   NativeMetrics metrics() const;
   const std::vector<Organism>& organisms() const { return organisms_; }
