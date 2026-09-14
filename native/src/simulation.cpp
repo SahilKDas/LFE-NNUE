@@ -60,7 +60,8 @@ int NativeSimulation::seedBenchmarkMovers(int count) {
 
 bool NativeSimulation::paintTerrain(int x, int y, TerrainType terrain) {
   const int index = safeIndex(x, y);
-  if (index < 0 || owners[index] >= 0) return false;
+  if (index < 0) return false;
+  if(owners[index]>=0&&(terrain==TerrainType::Water||terrain==TerrainType::Mountain))if(auto* organism=organismById(owners[index]))die(*organism);
   world.terrain[index] = uint8_t(terrain);
   if (terrain == TerrainType::Water || terrain == TerrainType::Mountain) {
     world.resources[index] = uint8_t(ResourceType::None);
@@ -71,9 +72,7 @@ bool NativeSimulation::paintTerrain(int x, int y, TerrainType terrain) {
 
 bool NativeSimulation::paintResource(int x, int y, ResourceType resource, uint16_t amount) {
   const int index = safeIndex(x, y);
-  if (index < 0 || owners[index] >= 0) return false;
-  const auto terrain = TerrainType(world.terrain[index]);
-  if (terrain == TerrainType::Water || terrain == TerrainType::Mountain) return false;
+  if (index < 0) return false;
   world.resources[index] = uint8_t(resource);
   world.resourceAmount[index] = resource == ResourceType::None ? 0 : amount;
   return true;
