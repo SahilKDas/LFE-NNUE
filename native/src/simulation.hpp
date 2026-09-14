@@ -52,7 +52,7 @@ class NativeSimulation {
   double foodChance_; int lifespan_, lineageLimit_, nnueEvaluations_{}; std::vector<Organism> organisms_;
   bool reproductionEnabled_{true}, mortalityEnabled_{true};
   std::unordered_map<int,size_t> slotById_;
-  std::vector<int> activeIds_;
+  std::vector<size_t> activeSlots_;
   std::vector<float> climateTemperature_, climateFertility_; std::vector<int8_t> climateGradient_; std::vector<uint8_t> climateBand_;
   int safeIndex(int x, int y) const;
   std::pair<int,int> rotated(int x, int y, int direction) const;
@@ -72,7 +72,7 @@ class NativeSimulation {
   BodyCell* localCellAt(Organism& organism, int x, int y);
   bool isClear(const Organism& organism, int x, int y, int rotation) const;
   bool straightPath(int x1, int y1, int x2, int y2, const Organism& parent) const;
-  std::vector<uint16_t> features(const Organism& organism) const;
+  void features(const Organism& organism,std::vector<uint16_t>& result) const;
   bool attemptMove(Organism& organism);
   bool attemptRotate(Organism& organism);
   void clearBody(const Organism& organism);
