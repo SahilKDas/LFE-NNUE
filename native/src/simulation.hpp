@@ -2,6 +2,7 @@
 #include "nnue.hpp"
 #include "reference.hpp"
 #include <cstdint>
+#include <array>
 #include <optional>
 #include <memory>
 #include <string>
@@ -11,20 +12,37 @@
 namespace life {
 struct BodyCell { CellType type; int x, y; int durability{}; };
 struct Organism {
-  int id{}, parentId{-1}, generation{}, birthTick{}, x{}, y{};
+  int id{}, parentId{-1}, generation{}, birthTick{}, deathTick{-1}, x{}, y{};
   std::vector<BodyCell> cells;
   int energy{StartEnergy}, minerals{}, lifetime{}, damage{}, mutability{5}; double neuralMutability{8};
   int birthDistance{4}, moveRange{4}, moveCount{}, direction{}, rotation{};
   bool living{true}, isProducer{}, isMover{}, isConsumer{}, isAttacker{};
   double thermalStress{};
   int perceptionRadius{DefaultSensorRadius}; uint8_t senseChannels{DefaultSenseChannels}; int neuralCost{168};
+  int totalDescendants{};
+  std::vector<std::string> mutations;
+  std::vector<uint16_t> lastFeatures;
+  std::array<float,OutputSize> lastOutputs{};
+  int lastAction{-1};
   std::shared_ptr<Nnue> brain;
+};
+
+struct LineageSummary { int id{}, generation{}; bool alive{}; };
+struct OrganismInspection {
+  int id{},parentId{-1},generation{},birthTick{},deathTick{-1},age{},cellCount{},energy{},minerals{},damage{};
+  double mutability{},neuralMutability{},thermalStress{},temperature{},fertility{},metabolicCost{};
+  bool alive{},isMover{};int perceptionRadius{},senseChannels{},neuralCost{},totalDescendants{},attackDurability{},armorDurability{};
+  std::string action,diet,terrain,resource;
+  std::vector<std::string> mutations;
+  std::vector<LineageSummary> ancestors,descendants;
+  std::vector<uint16_t> senses;
+  std::array<float,OutputSize> outputs{};bool hasOutputs{};
 };
 
 struct NativeMetrics { int organisms{}, record{}, generation{}, ticks{}, largest{}; double averageEnergy{}, temperature{}, fertility{}; int nnueEvaluations{}; };
 
 class NativeSimulation {
-  int width_, height_; uint32_t worldSeed_; Mulberry32 random_; int nextId_{1}, ticks_{}, resets_{}, record_{}, largest_{};
+  int width_, height_; uint32_t worldSeed_; Mulberry32 random_; int nextId_{1}, ticks_{}, resets_{}, record_{}, largest_{}, selectedId_{-1}, deadCount_{};
   double foodChance_; int lifespan_, nnueEvaluations_{}; std::vector<Organism> organisms_;
   bool reproductionEnabled_{true}, mortalityEnabled_{true};
   std::unordered_map<int,size_t> slotById_;
@@ -52,6 +70,7 @@ class NativeSimulation {
   bool attemptRotate(Organism& organism);
   void clearBody(const Organism& organism);
   void updateClimateCache();
+  void pruneLineage();
 public:
   WorldLayers world;
   std::vector<uint8_t> cells;
@@ -63,6 +82,8 @@ public:
   bool paintTerrain(int x, int y, TerrainType terrain);
   bool paintResource(int x, int y, ResourceType resource, uint16_t amount = 1000);
   const Organism* organismAt(int x, int y) const;
+  void select(int id) { selectedId_ = id; }
+  std::optional<OrganismInspection> inspect(int id) const;
   void step(int count = 1);
   NativeMetrics metrics() const;
   const std::vector<Organism>& organisms() const { return organisms_; }

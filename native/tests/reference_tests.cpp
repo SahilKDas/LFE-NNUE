@@ -47,6 +47,7 @@ int main() {
   life::NativeSimulation benchmarkPopulation(160,100,.2,500,73,19);check(benchmarkPopulation.seedBenchmarkMovers(10'000)==10'000,"benchmark population did not reach 10,000 movers");check(benchmarkPopulation.metrics().organisms==10'000,"benchmark mover metrics mismatch");
   life::NativeSimulation simulation(96,60,.2,500,524114809,334462);
   check(simulation.metrics().organisms==1&&simulation.metrics().averageEnergy==12.0,"native reset state mismatch");
+  const auto founder=simulation.inspect(1);check(founder.has_value()&&founder->generation==0&&founder->ancestors.empty()&&founder->descendants.empty()&&founder->diet=="Plant","native founder inspection mismatch");
   simulation.step();
   check(simulation.metrics().ticks==1,"native simulation clock mismatch");
   near(simulation.metrics().averageEnergy,11.989,1e-12,"native first-tick energy mismatch");
@@ -56,6 +57,8 @@ int main() {
   simulation.step(90);
   if(simulation.metrics().organisms!=39){std::cerr<<"FAIL: native tick-100 population mismatch (actual "<<simulation.metrics().organisms<<", expected 39)\n";++failures;}
   near(simulation.metrics().averageEnergy,13.923538461538461,1e-12,"native tick-100 energy mismatch");
+  const auto evolvedFounder=simulation.inspect(1);check(evolvedFounder.has_value()&&evolvedFounder->totalDescendants>0,"native lineage descendants were not recorded");
+  const auto descendant=std::find_if(simulation.organisms().begin(),simulation.organisms().end(),[](const life::Organism& organism){return organism.parentId>=0;});if(descendant!=simulation.organisms().end()){const auto childInspection=simulation.inspect(descendant->id);check(childInspection.has_value()&&!childInspection->ancestors.empty()&&!childInspection->mutations.empty(),"native descendant ancestry or mutations missing");}
   simulation.step(900);
   if(simulation.metrics().organisms!=795){std::cerr<<"FAIL: native tick-1000 population mismatch (actual "<<simulation.metrics().organisms<<", expected 795)\n";++failures;}
   near(simulation.metrics().averageEnergy,15.238471698113209,1e-12,"native tick-1000 energy mismatch");
