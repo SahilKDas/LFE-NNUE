@@ -97,4 +97,4 @@ cmake -S native -B native/build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
 cmake --build native/build -j 4
 ~~~
 
-Run `native/build/life_engine.exe` to launch the native compatibility shell. It serves and opens the production frontend unchanged, so consumer-visible words, fonts, CSS, controls, physics, NNUE seed, and behavior remain identical. `life_engine_native_core.exe` is the separate native-core migration harness and is not the consumer application until it reaches parity.
+Run `native/build/life_engine.exe` to launch the application in its own native window. The executable embeds the unchanged production frontend with Microsoft WebView2, so consumer-visible words, fonts, CSS, controls, physics, NNUE seed, and behavior remain identical. Keep `WebView2Loader.dll` beside the executable when distributing it. `life_engine_native_core.exe` is the separate native-core migration harness and is not the consumer application until it reaches parity.
