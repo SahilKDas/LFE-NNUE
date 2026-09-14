@@ -26,6 +26,7 @@ struct NativeMetrics { int organisms{}, record{}, generation{}, ticks{}, largest
 class NativeSimulation {
   int width_, height_; uint32_t worldSeed_; Mulberry32 random_; int nextId_{1}, ticks_{}, resets_{}, record_{}, largest_{};
   double foodChance_; int lifespan_, nnueEvaluations_{}; std::vector<Organism> organisms_;
+  bool reproductionEnabled_{true}, mortalityEnabled_{true};
   std::unordered_map<int,size_t> slotById_;
   std::vector<float> climateTemperature_, climateFertility_; std::vector<int8_t> climateGradient_; std::vector<uint8_t> climateBand_;
   int safeIndex(int x, int y) const;
@@ -58,6 +59,7 @@ public:
   NativeSimulation(int width, int height, double foodChance, int lifespan, uint32_t worldSeed, uint32_t randomSeed);
   void reset();
   void regenerate(uint32_t seed);
+  int seedBenchmarkMovers(int count);
   bool paintTerrain(int x, int y, TerrainType terrain);
   bool paintResource(int x, int y, ResourceType resource, uint16_t amount = 1000);
   const Organism* organismAt(int x, int y) const;

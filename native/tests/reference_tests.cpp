@@ -44,6 +44,7 @@ int main() {
   check(editableIndex>=0,"editable terrain cell unavailable");
   if(editableIndex>=0){const int x=editableIndex%32,y=editableIndex/32;check(editable.paintTerrain(x,y,life::TerrainType::Desert),"terrain painting failed");check(life::TerrainType(editable.world.terrain[editableIndex])==life::TerrainType::Desert,"terrain paint did not persist");check(editable.paintResource(x,y,life::ResourceType::Mineral,777),"resource painting failed");check(life::ResourceType(editable.world.resources[editableIndex])==life::ResourceType::Mineral&&editable.world.resourceAmount[editableIndex]==777,"resource paint did not persist");}
   const auto priorTerrain=editable.world.terrain;editable.regenerate(42);check(editable.metrics().ticks==0&&editable.metrics().organisms==1,"regeneration did not reset simulation");check(editable.world.terrain!=priorTerrain,"regeneration seed did not replace terrain");check(editable.organismAt(16,10)!=nullptr,"organism inspection lookup failed");
+  life::NativeSimulation benchmarkPopulation(160,100,.2,500,73,19);check(benchmarkPopulation.seedBenchmarkMovers(10'000)==10'000,"benchmark population did not reach 10,000 movers");check(benchmarkPopulation.metrics().organisms==10'000,"benchmark mover metrics mismatch");
   life::NativeSimulation simulation(96,60,.2,500,524114809,334462);
   check(simulation.metrics().organisms==1&&simulation.metrics().averageEnergy==12.0,"native reset state mismatch");
   simulation.step();
