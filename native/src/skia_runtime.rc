@@ -1,0 +1,2 @@
+#define LIFE_ENGINE_SKIA_RESOURCE 101
+LIFE_ENGINE_SKIA_RESOURCE RCDATA "../vendor/skia/x64/libSkiaSharp.dll"
