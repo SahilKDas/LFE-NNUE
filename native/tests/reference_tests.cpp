@@ -1,4 +1,5 @@
 #include "reference.hpp"
+#include "nnue.hpp"
 #include <cmath>
 #include <iostream>
 
@@ -25,6 +26,17 @@ int main() {
   check(first.resources == second.resources, "resource generation is not deterministic");
   check(first.resourceAmount == second.resourceAmount, "resource amounts are not deterministic");
   check(first.terrain != life::generateWorld(96, 60, 524114810).terrain, "world seed does not affect terrain");
+  const auto defaultPerception = life::clampPerception(2, life::DefaultSenseChannels);
+  check(defaultPerception.radius == 2 && defaultPerception.channels == 239 && defaultPerception.cost == 168, "default perception mismatch");
+  const auto clampedPerception = life::clampPerception(4, 255);
+  check(clampedPerception.radius == 3 && clampedPerception.channels == 255 && clampedPerception.cost == 384, "perception budget mismatch");
+  life::Mulberry32 neuralRandom(334462u ^ 0x4e4e5545u);
+  life::Nnue brain(neuralRandom);
+  const std::array<uint16_t, 7> features{0, 21, 65, 203, 1601, 1606, 1612};
+  const auto& outputs = brain.evaluate(features);
+  const double expectedOutputs[] = {0.023251008242368698, -0.02539653144776821, 0.07016514986753464, -0.05609821155667305, 0.008624186739325523};
+  for (int index = 0; index < life::OutputSize; ++index) near(outputs[index], expectedOutputs[index], 1e-7, "NNUE output mismatch");
+  check(brain.action(features) == 2, "NNUE action mismatch");
   if (!failures) std::cout << "Native deterministic substrate matches the frozen TypeScript contract.\n";
   return failures ? 1 : 0;
 }

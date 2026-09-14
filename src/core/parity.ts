@@ -81,7 +81,7 @@ export function recordParity(randomSeed = 0x51a7e, worldSeed = 0x1f3d5b79): Pari
         nnueEvaluations: metrics.nnueEvaluations,
       });
     }
-    return { schema: 1, randomSeed, worldSeed, width, height, frames, neural: neuralFixture(random) };
+    return { schema: 1, randomSeed, worldSeed, width, height, frames, neural: neuralFixture(mulberry32(randomSeed ^ 0x4e4e5545)) };
   } finally {
     Math.random = previousRandom;
   }
