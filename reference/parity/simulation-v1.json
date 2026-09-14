@@ -1,0 +1,103 @@
+{
+  "schema": 1,
+  "randomSeed": 334462,
+  "worldSeed": 524114809,
+  "width": 96,
+  "height": 60,
+  "frames": [
+    {
+      "tick": 0,
+      "stateHash": "343b32ea4840d95cab47b17cdeedd776b582c30c053fcd4cab74e0fe4f75ca88",
+      "organisms": 1,
+      "record": 0,
+      "generation": 1,
+      "largest": 3,
+      "season": "Spring",
+      "seasonPhase": 0,
+      "temperature": 0.5,
+      "fertility": 0.85,
+      "averageStress": 0,
+      "averageEnergy": 12,
+      "nnueEvaluations": 0
+    },
+    {
+      "tick": 1,
+      "stateHash": "8dac5314a81b1de7799ab2091dd9754a99c1c7f3d6b35f05ae1794db1f5b1de2",
+      "organisms": 1,
+      "record": 1,
+      "generation": 1,
+      "largest": 3,
+      "season": "Spring",
+      "seasonPhase": 0.000041666666666666665,
+      "temperature": 0.4999977813611457,
+      "fertility": 0.8499977813611457,
+      "averageStress": 0,
+      "averageEnergy": 11.989,
+      "nnueEvaluations": 0
+    },
+    {
+      "tick": 10,
+      "stateHash": "53372fe6b4c9faf497fba2f1492145c889e8f4eb671787a5a60c69947b6047eb",
+      "organisms": 1,
+      "record": 1,
+      "generation": 1,
+      "largest": 3,
+      "season": "Spring",
+      "seasonPhase": 0.0004166666666666667,
+      "temperature": 0.4999778136365473,
+      "fertility": 0.8499778136365472,
+      "averageStress": 0,
+      "averageEnergy": 15.925,
+      "nnueEvaluations": 0
+    },
+    {
+      "tick": 100,
+      "stateHash": "b3eff30756ba7a169bda6653b88b6b154157d8c2807db063c1535547ec9eb5c1",
+      "organisms": 39,
+      "record": 39,
+      "generation": 1,
+      "largest": 3,
+      "season": "Spring",
+      "seasonPhase": 0.004166666666666667,
+      "temperature": 0.499778161455018,
+      "fertility": 0.8497781614550179,
+      "averageStress": 0,
+      "averageEnergy": 13.923538461538461,
+      "nnueEvaluations": 0
+    },
+    {
+      "tick": 1000,
+      "stateHash": "7e193fae948fceed932a84e374186116c0d9f81b5939f2fde94c1f968499e9df",
+      "organisms": 795,
+      "record": 795,
+      "generation": 1,
+      "largest": 4,
+      "season": "Spring",
+      "seasonPhase": 0.041666666666666664,
+      "temperature": 0.497806618261843,
+      "fertility": 0.847806618261843,
+      "averageStress": 0,
+      "averageEnergy": 15.238471698113209,
+      "nnueEvaluations": 36
+    }
+  ],
+  "neural": {
+    "features": [
+      0,
+      21,
+      65,
+      203,
+      1601,
+      1606,
+      1612
+    ],
+    "outputs": [
+      0.06129775196313858,
+      0.014818898402154446,
+      0.17553366720676422,
+      0.03246106579899788,
+      0.04736844822764397
+    ],
+    "action": 2
+  }
+}

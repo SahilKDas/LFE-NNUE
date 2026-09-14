@@ -13,6 +13,7 @@
     "benchmark": "tsx scripts/benchmark.ts",
     "build:nim": "nim js -d:release --out:public/nim-ecology-kernel.js nim/simulation_kernel.nim",
     "benchmark:nim": "node scripts/benchmark-nim.mjs",
+    "parity:record": "tsx scripts/record-parity.ts",
     "verify": "npm run test && npm run train && npm run build"
   },
   "devDependencies": {

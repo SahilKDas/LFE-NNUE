@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "world": { "width": 1024, "height": 640, "climateCycleTicks": 24000 },
+  "energy": { "scale": 1000, "start": 12000, "plant": 4000, "carrion": 3000 },
+  "costs": { "cellBase": 2, "move": 15, "produce": 5, "attack": 120 },
+  "durability": { "killer": 12, "armor": 18 },
+  "neural": {
+    "schemaVersion": 3,
+    "featureCategories": 20,
+    "positionCount": 80,
+    "hiddenSize": 16,
+    "outputSize": 5,
+    "inputSize": 1625,
+    "defaultRadius": 2,
+    "maximumRadius": 4,
+    "maximumInferenceBudget": 400
+  },
+  "cellTypes": ["Empty", "Food", "Wall", "Mouth", "Producer", "Mover", "Killer", "Armor", "PlantMouth", "ScavengerMouth", "MineralMouth", "Inert"],
+  "terrainTypes": ["Plains", "Fertile", "Desert", "Water", "Mountain"],
+  "resourceTypes": ["None", "Plant", "Carrion", "Mineral"],
+  "actions": ["Up", "Down", "Left", "Right", "Wait"]
+}
