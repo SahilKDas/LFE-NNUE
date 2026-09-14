@@ -1,5 +1,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <windowsx.h>
+#include "reference.hpp"
 #include "skia_api.hpp"
 #include <algorithm>
 #include <cstdint>
@@ -12,6 +14,14 @@ std::unique_ptr<life::skia::Api> api;
 std::vector<uint32_t> pixels;
 BITMAPINFO bitmap{};
 int surfaceWidth{}, surfaceHeight{};
+life::WorldLayers world = life::generateWorld(life::WorldWidth, life::WorldHeight, 1);
+float zoom = 1.0f, cameraX = 0.0f, cameraY = 0.0f;
+bool dragging = false;
+POINT dragOrigin{};
+float dragCameraX{}, dragCameraY{};
+
+constexpr uint32_t terrainColors[] = {0xff2e4330, 0xff2b5b36, 0xff6c5232, 0xff1a3e5f, 0xff4d525a};
+constexpr uint32_t resourceColors[] = {0, 0xff18b437, 0xff8b4b32, 0xffd7bd52};
 
 std::filesystem::path libraryPath() {
   wchar_t executable[MAX_PATH]{};
@@ -53,12 +63,42 @@ void render(HWND window, HDC dc) {
   rectangle(canvas, paint, width - aside + 14, 190, width - 14, 455, 0xfff6f7fb);
   rectangle(canvas, paint, width - aside + 14, 470, width - 14, height - 14, 0xfff6f7fb);
   api->paintDelete(paint); api->surfaceUnref(surface);
+  const int stageLeft = 14, stageTop = 14, stageRight = std::max(stageLeft, int(width - aside - 12)), stageBottom = height - 14;
+  for (int screenY = stageTop; screenY < stageBottom; ++screenY) {
+    const int worldY = int((screenY - stageTop - cameraY) / zoom);
+    if (worldY < 0 || worldY >= life::WorldHeight) continue;
+    auto* destination = pixels.data() + size_t(screenY) * width;
+    for (int screenX = stageLeft; screenX < stageRight; ++screenX) {
+      const int worldX = int((screenX - stageLeft - cameraX) / zoom);
+      if (worldX < 0 || worldX >= life::WorldWidth) continue;
+      const int index = worldY * life::WorldWidth + worldX;
+      const auto resource = world.resources[index];
+      destination[screenX] = resource ? resourceColors[resource] : terrainColors[world.terrain[index]];
+    }
+  }
   StretchDIBits(dc, 0, 0, width, height, 0, 0, width, height, pixels.data(), &bitmap, DIB_RGB_COLORS, SRCCOPY);
 }
 
 LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
   if (message == WM_PAINT) { PAINTSTRUCT paint{}; HDC dc = BeginPaint(window, &paint); render(window, dc); EndPaint(window, &paint); return 0; }
   if (message == WM_SIZE) { InvalidateRect(window, nullptr, FALSE); return 0; }
+  if (message == WM_LBUTTONDOWN || message == WM_MBUTTONDOWN) {
+    dragging = true; dragOrigin = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+    dragCameraX = cameraX; dragCameraY = cameraY; SetCapture(window); return 0;
+  }
+  if (message == WM_MOUSEMOVE && dragging) {
+    cameraX = dragCameraX + GET_X_LPARAM(lParam) - dragOrigin.x;
+    cameraY = dragCameraY + GET_Y_LPARAM(lParam) - dragOrigin.y;
+    InvalidateRect(window, nullptr, FALSE); return 0;
+  }
+  if (message == WM_LBUTTONUP || message == WM_MBUTTONUP) { dragging = false; ReleaseCapture(); return 0; }
+  if (message == WM_MOUSEWHEEL) {
+    POINT cursor{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)}; ScreenToClient(window, &cursor);
+    const float previous = zoom; zoom = std::clamp(zoom * (GET_WHEEL_DELTA_WPARAM(wParam) > 0 ? 1.2f : 1.0f / 1.2f), .2f, 12.0f);
+    cameraX = cursor.x - (cursor.x - 14 - cameraX) * zoom / previous;
+    cameraY = cursor.y - (cursor.y - 14 - cameraY) * zoom / previous;
+    InvalidateRect(window, nullptr, FALSE); return 0;
+  }
   if (message == WM_DESTROY) { PostQuitMessage(0); return 0; }
   return DefWindowProcW(window, message, wParam, lParam);
 }
