@@ -97,4 +97,4 @@ cmake -S native -B native/build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
 cmake --build native/build -j 4
 ~~~
 
-Run `native/build/life_engine.exe`. Press Space to pause, R to generate a new seeded world, and click an organism to inspect it.
+Run `native/build/life_engine.exe` to launch the native compatibility shell. It serves and opens the production frontend unchanged, so consumer-visible words, fonts, CSS, controls, physics, NNUE seed, and behavior remain identical. `life_engine_native_core.exe` is the separate native-core migration harness and is not the consumer application until it reaches parity.
