@@ -1,5 +1,6 @@
 #include "reference.hpp"
 #include "nnue.hpp"
+#include "simulation.hpp"
 #include <cmath>
 #include <iostream>
 
@@ -37,6 +38,11 @@ int main() {
   const double expectedOutputs[] = {0.023251008242368698, -0.02539653144776821, 0.07016514986753464, -0.05609821155667305, 0.008624186739325523};
   for (int index = 0; index < life::OutputSize; ++index) near(outputs[index], expectedOutputs[index], 1e-7, "NNUE output mismatch");
   check(brain.action(features) == 2, "NNUE action mismatch");
+  life::NativeSimulation simulation(96,60,.2,500,524114809,334462);
+  check(simulation.metrics().organisms==1&&simulation.metrics().averageEnergy==12.0,"native reset state mismatch");
+  simulation.step();
+  check(simulation.metrics().ticks==1,"native simulation clock mismatch");
+  near(simulation.metrics().averageEnergy,11.989,1e-12,"native first-tick energy mismatch");
   if (!failures) std::cout << "Native deterministic substrate matches the frozen TypeScript contract.\n";
   return failures ? 1 : 0;
 }

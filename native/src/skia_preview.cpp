@@ -2,6 +2,7 @@
 #include <windows.h>
 #include <windowsx.h>
 #include "reference.hpp"
+#include "simulation.hpp"
 #include "skia_api.hpp"
 #include <algorithm>
 #include <cstdint>
@@ -14,7 +15,7 @@ std::unique_ptr<life::skia::Api> api;
 std::vector<uint32_t> pixels;
 BITMAPINFO bitmap{};
 int surfaceWidth{}, surfaceHeight{};
-life::WorldLayers world = life::generateWorld(life::WorldWidth, life::WorldHeight, 1);
+life::NativeSimulation simulation(life::WorldWidth, life::WorldHeight, .2, 500, 1, 1);
 float zoom = 1.0f, cameraX = 0.0f, cameraY = 0.0f;
 bool dragging = false;
 POINT dragOrigin{};
@@ -22,6 +23,7 @@ float dragCameraX{}, dragCameraY{};
 
 constexpr uint32_t terrainColors[] = {0xff2e4330, 0xff2b5b36, 0xff6c5232, 0xff1a3e5f, 0xff4d525a};
 constexpr uint32_t resourceColors[] = {0, 0xff18b437, 0xff8b4b32, 0xffd7bd52};
+constexpr uint32_t cellColors[] = {0,0xff008000,0xff808080,0xffffa500,0xffffffff,0xff3493eb,0xffff0000,0xff800080,0xffff9f43,0xffd67c4a,0xffd6c36a,0xff59636f};
 
 std::filesystem::path libraryPath() {
   wchar_t executable[MAX_PATH]{};
@@ -72,8 +74,8 @@ void render(HWND window, HDC dc) {
       const int worldX = int((screenX - stageLeft - cameraX) / zoom);
       if (worldX < 0 || worldX >= life::WorldWidth) continue;
       const int index = worldY * life::WorldWidth + worldX;
-      const auto resource = world.resources[index];
-      destination[screenX] = resource ? resourceColors[resource] : terrainColors[world.terrain[index]];
+      const auto resource = simulation.world.resources[index], cell = simulation.cells[index];
+      destination[screenX] = cell ? cellColors[cell] : resource ? resourceColors[resource] : terrainColors[simulation.world.terrain[index]];
     }
   }
   StretchDIBits(dc, 0, 0, width, height, 0, 0, width, height, pixels.data(), &bitmap, DIB_RGB_COLORS, SRCCOPY);
@@ -82,6 +84,7 @@ void render(HWND window, HDC dc) {
 LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
   if (message == WM_PAINT) { PAINTSTRUCT paint{}; HDC dc = BeginPaint(window, &paint); render(window, dc); EndPaint(window, &paint); return 0; }
   if (message == WM_SIZE) { InvalidateRect(window, nullptr, FALSE); return 0; }
+  if (message == WM_TIMER) { simulation.step(); InvalidateRect(window, nullptr, FALSE); return 0; }
   if (message == WM_LBUTTONDOWN || message == WM_MBUTTONDOWN) {
     dragging = true; dragOrigin = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
     dragCameraX = cameraX; dragCameraY = cameraY; SetCapture(window); return 0;
@@ -113,6 +116,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int show) {
   HWND window = CreateWindowExW(0, type.lpszClassName, L"Life Engine NNUE — Native Skia Preview",
     WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 1500, 900, nullptr, nullptr, instance, nullptr);
   ShowWindow(window, show);
+  SetTimer(window, 1, 16, nullptr);
   MSG message{}; while (GetMessageW(&message, nullptr, 0, 0) > 0) { TranslateMessage(&message); DispatchMessageW(&message); }
   api.reset(); return int(message.wParam);
 }
