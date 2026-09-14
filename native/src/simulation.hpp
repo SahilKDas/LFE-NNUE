@@ -3,6 +3,7 @@
 #include "reference.hpp"
 #include <cstdint>
 #include <optional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -11,18 +12,19 @@ struct BodyCell { CellType type; int x, y; int durability{}; };
 struct Organism {
   int id{}, parentId{-1}, generation{}, birthTick{}, x{}, y{};
   std::vector<BodyCell> cells;
-  int energy{StartEnergy}, minerals{}, lifetime{}, damage{}, mutability{5}, neuralMutability{8};
+  int energy{StartEnergy}, minerals{}, lifetime{}, damage{}, mutability{5}; double neuralMutability{8};
   int birthDistance{4}, moveRange{4}, moveCount{}, direction{}, rotation{};
   bool living{true}, isProducer{}, isMover{}, isConsumer{}, isAttacker{};
   double thermalStress{};
   int perceptionRadius{DefaultSensorRadius}; uint8_t senseChannels{DefaultSenseChannels}; int neuralCost{168};
+  std::shared_ptr<Nnue> brain;
 };
 
-struct NativeMetrics { int organisms{}, record{}, generation{}, ticks{}, largest{}; double averageEnergy{}, temperature{}, fertility{}; };
+struct NativeMetrics { int organisms{}, record{}, generation{}, ticks{}, largest{}; double averageEnergy{}, temperature{}, fertility{}; int nnueEvaluations{}; };
 
 class NativeSimulation {
   int width_, height_; uint32_t worldSeed_; Mulberry32 random_; int nextId_{1}, ticks_{}, resets_{}, record_{}, largest_{};
-  double foodChance_; int lifespan_; std::vector<Organism> organisms_;
+  double foodChance_; int lifespan_, nnueEvaluations_{}; std::vector<Organism> organisms_;
   int safeIndex(int x, int y) const;
   std::pair<int,int> rotated(int x, int y, int direction) const;
   void placeBody(const Organism& organism);
@@ -30,6 +32,15 @@ class NativeSimulation {
   void updateOrganism(Organism& organism);
   void eat(Organism& organism, CellType mouth, int x, int y);
   void produce(Organism& organism, int x, int y);
+  void reproduce(Organism& parent);
+  void mutate(Organism& organism);
+  void die(Organism& organism);
+  bool isClear(const Organism& organism, int x, int y, int rotation) const;
+  bool straightPath(int x1, int y1, int x2, int y2, const Organism& parent) const;
+  std::vector<uint16_t> features(const Organism& organism) const;
+  bool attemptMove(Organism& organism);
+  bool attemptRotate(Organism& organism);
+  void clearBody(const Organism& organism);
 public:
   WorldLayers world;
   std::vector<uint8_t> cells;

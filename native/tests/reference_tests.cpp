@@ -7,7 +7,7 @@
 namespace {
 int failures = 0;
 void check(bool condition, const char* message) { if (!condition) { std::cerr << "FAIL: " << message << '\n'; ++failures; } }
-void near(double actual, double expected, double tolerance, const char* message) { check(std::abs(actual - expected) <= tolerance, message); }
+void near(double actual, double expected, double tolerance, const char* message) { if(std::abs(actual-expected)>tolerance){std::cerr<<"FAIL: "<<message<<" (actual "<<actual<<", expected "<<expected<<")\n";++failures;} }
 }
 
 int main() {
@@ -43,6 +43,16 @@ int main() {
   simulation.step();
   check(simulation.metrics().ticks==1,"native simulation clock mismatch");
   near(simulation.metrics().averageEnergy,11.989,1e-12,"native first-tick energy mismatch");
+  simulation.step(9);
+  check(simulation.metrics().organisms==1,"native tick-10 population mismatch");
+  near(simulation.metrics().averageEnergy,15.925,1e-12,"native tick-10 energy mismatch");
+  simulation.step(90);
+  if(simulation.metrics().organisms!=39){std::cerr<<"FAIL: native tick-100 population mismatch (actual "<<simulation.metrics().organisms<<", expected 39)\n";++failures;}
+  near(simulation.metrics().averageEnergy,13.923538461538461,1e-12,"native tick-100 energy mismatch");
+  simulation.step(900);
+  if(simulation.metrics().organisms!=795){std::cerr<<"FAIL: native tick-1000 population mismatch (actual "<<simulation.metrics().organisms<<", expected 795)\n";++failures;}
+  near(simulation.metrics().averageEnergy,15.238471698113209,1e-12,"native tick-1000 energy mismatch");
+  check(simulation.metrics().nnueEvaluations==36,"native tick-1000 NNUE evaluation count mismatch");
   if (!failures) std::cout << "Native deterministic substrate matches the frozen TypeScript contract.\n";
   return failures ? 1 : 0;
 }

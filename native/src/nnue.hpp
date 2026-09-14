@@ -44,6 +44,14 @@ public:
     for (float& value : outputBias) value = weight(random, .05);
     accumulator = hiddenBias;
   }
+  Nnue(const Nnue& source) : inputWeights(source.inputWeights), hiddenBias(source.hiddenBias), accumulator(source.hiddenBias),
+    outputWeights(source.outputWeights), outputBias(source.outputBias) {}
+  void mutate(Mulberry32& random, double probability=.03, double magnitude=.2) {
+    bool changed=false;const auto perturb=[&](float& value){if(random()<probability){value=float(value+weight(random,magnitude));changed=true;}};
+    for(auto& row:inputWeights)for(float& value:row)perturb(value);for(float& value:hiddenBias)perturb(value);for(auto& row:outputWeights)for(float& value:row)perturb(value);for(float& value:outputBias)perturb(value);
+    if(!changed){const int index=int(std::floor(random()*OutputSize));outputBias[index]=float(outputBias[index]+weight(random,magnitude));}
+    active.clear();accumulator=hiddenBias;
+  }
   const std::array<float, OutputSize>& evaluate(std::span<const uint16_t> features) {
     size_t oldIndex = 0, newIndex = 0;
     while (oldIndex < active.size() || newIndex < features.size()) {
