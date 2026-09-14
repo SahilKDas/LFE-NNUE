@@ -7,5 +7,5 @@ describe("native rewrite parity fixture", () => {
   it("matches the frozen deterministic TypeScript trace", () => {
     const expected = JSON.parse(readFileSync(resolve("reference/parity/simulation-v1.json"), "utf8"));
     expect(recordParity()).toEqual(expected);
-  });
+  }, 15_000);
 });

@@ -3,7 +3,7 @@ import { Nnue, type BrainSeed } from "./nnue";
 import { mulberry32 } from "./random";
 import { Simulation } from "./simulation";
 
-export const PARITY_CHECKPOINTS = [0, 1, 10, 100, 1_000] as const;
+export const PARITY_CHECKPOINTS = [0, 1, 10, 100, 1_000, 1_100, 1_200, 1_300, 1_400, 1_500, 1_600, 1_700, 1_800, 1_900, 2_000] as const;
 
 export interface ParityFrame {
   tick: number;

@@ -53,6 +53,11 @@ int main() {
   if(simulation.metrics().organisms!=795){std::cerr<<"FAIL: native tick-1000 population mismatch (actual "<<simulation.metrics().organisms<<", expected 795)\n";++failures;}
   near(simulation.metrics().averageEnergy,15.238471698113209,1e-12,"native tick-1000 energy mismatch");
   check(simulation.metrics().nnueEvaluations==36,"native tick-1000 NNUE evaluation count mismatch");
+  constexpr int populations[]={803,817,822,823,820,776,751,755,776,786};
+  constexpr int evaluations[]={45,54,63,72,86,124,160,213,272,351};
+  for(int checkpoint=0;checkpoint<10;++checkpoint){simulation.step(100);const auto current=simulation.metrics();if(current.organisms!=populations[checkpoint]){std::cerr<<"FAIL: native tick-"<<(1100+checkpoint*100)<<" population mismatch (actual "<<current.organisms<<", expected "<<populations[checkpoint]<<")\n";++failures;}if(current.nnueEvaluations!=evaluations[checkpoint]){std::cerr<<"FAIL: native tick-"<<(1100+checkpoint*100)<<" NNUE count mismatch (actual "<<current.nnueEvaluations<<", expected "<<evaluations[checkpoint]<<")\n";++failures;}}
+  check(simulation.metrics().record==823,"native tick-2000 population record mismatch");
+  near(simulation.metrics().averageEnergy,18.353055979643766,1e-12,"native tick-2000 energy mismatch");
   if (!failures) std::cout << "Native deterministic substrate matches the frozen TypeScript contract.\n";
   return failures ? 1 : 0;
 }

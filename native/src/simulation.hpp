@@ -6,6 +6,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <unordered_map>
 
 namespace life {
 struct BodyCell { CellType type; int x, y; int durability{}; };
@@ -25,6 +26,8 @@ struct NativeMetrics { int organisms{}, record{}, generation{}, ticks{}, largest
 class NativeSimulation {
   int width_, height_; uint32_t worldSeed_; Mulberry32 random_; int nextId_{1}, ticks_{}, resets_{}, record_{}, largest_{};
   double foodChance_; int lifespan_, nnueEvaluations_{}; std::vector<Organism> organisms_;
+  std::unordered_map<int,size_t> slotById_;
+  std::vector<float> climateTemperature_, climateFertility_; std::vector<int8_t> climateGradient_; std::vector<uint8_t> climateBand_;
   int safeIndex(int x, int y) const;
   std::pair<int,int> rotated(int x, int y, int direction) const;
   void placeBody(const Organism& organism);
@@ -35,12 +38,19 @@ class NativeSimulation {
   void reproduce(Organism& parent);
   void mutate(Organism& organism);
   void die(Organism& organism);
+  void attack(Organism& attacker, BodyCell& weapon, int x, int y);
+  void harm(Organism& organism);
+  void harmAt(Organism& organism, int index);
+  Organism* organismById(int id);
+  const Organism* organismById(int id) const;
+  BodyCell* localCellAt(Organism& organism, int x, int y);
   bool isClear(const Organism& organism, int x, int y, int rotation) const;
   bool straightPath(int x1, int y1, int x2, int y2, const Organism& parent) const;
   std::vector<uint16_t> features(const Organism& organism) const;
   bool attemptMove(Organism& organism);
   bool attemptRotate(Organism& organism);
   void clearBody(const Organism& organism);
+  void updateClimateCache();
 public:
   WorldLayers world;
   std::vector<uint8_t> cells;
