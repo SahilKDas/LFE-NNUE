@@ -200,5 +200,10 @@ void NativeSimulation::step(int count) {
     if(deadCount_>lineageLimit_)pruneLineage();int living=0;for(const auto& organism:organisms_)living+=organism.living;record_=std::max(record_,living);
   }
 }
-NativeMetrics NativeSimulation::metrics() const { double energy=0;int living=0;for(const auto& organism:organisms_)if(organism.living){energy+=organism.energy;++living;}const auto climate=climateAt(height_/2,height_,ticks_);return{living,record_,resets_,ticks_,largest_,living?energy/living/EnergyScale:0,climate.temperature,climate.fertility,nnueEvaluations_}; }
+NativeMetrics NativeSimulation::metrics() const {
+  double energy=0,mutation=0,stress=0;int living=0,plantEaters=0,scavengers=0,mineralEaters=0,predators=0;
+  size_t memory=cells.capacity()*sizeof(uint8_t)+owners.capacity()*sizeof(int32_t)+world.terrain.capacity()*sizeof(uint8_t)+world.resources.capacity()*sizeof(uint8_t)+world.resourceAmount.capacity()*sizeof(uint16_t)+organisms_.capacity()*sizeof(Organism);
+  for(const auto& organism:organisms_)if(organism.living){energy+=organism.energy;mutation+=organism.mutability;stress+=organism.thermalStress;++living;memory+=organism.cells.capacity()*sizeof(BodyCell)+organism.mutations.capacity()*sizeof(std::string)+organism.lastFeatures.capacity()*sizeof(uint16_t);for(const auto& cell:organism.cells){if(cell.type==CellType::Mouth||cell.type==CellType::PlantMouth)++plantEaters;else if(cell.type==CellType::ScavengerMouth)++scavengers;else if(cell.type==CellType::MineralMouth)++mineralEaters;else if(cell.type==CellType::Killer)++predators;}}
+  const auto climate=climateAt(height_/2,height_,ticks_);return{living,record_,resets_,ticks_,largest_,living?energy/living/EnergyScale:0,living?mutation/living:0,living?stress/living:0,climate.temperature,climate.fertility,plantEaters,scavengers,mineralEaters,predators,nnueEvaluations_,memory};
+}
 }

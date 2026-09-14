@@ -39,7 +39,12 @@ struct OrganismInspection {
   std::array<float,OutputSize> outputs{};bool hasOutputs{};
 };
 
-struct NativeMetrics { int organisms{}, record{}, generation{}, ticks{}, largest{}; double averageEnergy{}, temperature{}, fertility{}; int nnueEvaluations{}; };
+struct NativeMetrics {
+  int organisms{},record{},generation{},ticks{},largest{};
+  double averageEnergy{},averageMutation{},averageStress{},temperature{},fertility{};
+  int plantEaters{},scavengers{},mineralEaters{},predators{},nnueEvaluations{};
+  size_t memoryEstimate{};
+};
 
 class NativeSimulation {
   int width_, height_; uint32_t worldSeed_; Mulberry32 random_; int nextId_{1}, ticks_{}, resets_{}, record_{}, largest_{}, selectedId_{-1}, deadCount_{};
