@@ -24,7 +24,7 @@ target_link_options(life_engine_native_core PRIVATE -municode -static -static-li
 target_link_libraries(life_engine_native_core PRIVATE user32 gdi32)
 target_compile_options(life_engine PRIVATE -O3 -Wall -Wextra)
 target_link_options(life_engine PRIVATE -municode -static -static-libgcc -static-libstdc++)
-target_link_libraries(life_engine PRIVATE user32 gdi32)
+target_link_libraries(life_engine PRIVATE user32 gdi32 winmm)
 add_custom_command(TARGET life_engine POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/skia/x64/libSkiaSharp.dll

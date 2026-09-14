@@ -1,6 +1,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <windowsx.h>
+#include <mmsystem.h>
 #include "reference.hpp"
 #include "simulation.hpp"
 #include "skia_api.hpp"
@@ -14,6 +15,7 @@
 #include <iomanip>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <shared_mutex>
 #include <sstream>
 #include <thread>
@@ -46,6 +48,15 @@ auto measurementStart = std::chrono::steady_clock::now();
 auto lastRenderRequest = measurementStart;
 std::shared_mutex simulationMutex;
 std::jthread simulationThread;
+bool uiBenchmark=false;
+int uiBenchmarkSeconds=60;
+std::atomic_uint64_t uiBenchmarkTicks=0;
+uint64_t uiBenchmarkFrames=0,uiBenchmarkInputs=0;
+double uiBenchmarkRenderMs=0;
+auto uiBenchmarkStart=measurementStart;
+auto nextBenchmarkInput=measurementStart;
+std::optional<std::chrono::steady_clock::time_point> pendingInput;
+std::vector<double> inputLatenciesMs;
 
 constexpr uint32_t terrainColors[] = {0xff2e4330, 0xff2b5b36, 0xff6c5232, 0xff1a3e5f, 0xff4d525a};
 constexpr uint32_t resourceColors[] = {0, 0xff18b437, 0xff8b4b32, 0xffd7bd52};
@@ -56,6 +67,8 @@ std::filesystem::path libraryPath() {
   GetModuleFileNameW(nullptr, executable, MAX_PATH);
   return std::filesystem::path(executable).parent_path() / "libSkiaSharp.dll";
 }
+
+void writeUiBenchmarkReport(){const auto now=std::chrono::steady_clock::now();const double elapsed=std::chrono::duration<double>(now-uiBenchmarkStart).count();std::sort(inputLatenciesMs.begin(),inputLatenciesMs.end());const size_t p95Index=inputLatenciesMs.empty()?0:std::min(inputLatenciesMs.size()-1,size_t(std::ceil(inputLatenciesMs.size()*.95))-1);const double p95=inputLatenciesMs.empty()?0:inputLatenciesMs[p95Index];size_t organisms=0;{std::shared_lock lock(simulationMutex);organisms=simulation.metrics().organisms;}const double tps=uiBenchmarkTicks.load()/elapsed,fps=uiBenchmarkFrames/elapsed,renderMs=uiBenchmarkFrames?uiBenchmarkRenderMs/uiBenchmarkFrames:0;const bool passed=organisms==10'000&&tps>=60&&fps>=45&&p95<100;std::ostringstream report;report<<std::fixed<<std::setprecision(2)<<"organisms="<<organisms<<" elapsed_s="<<elapsed<<" measured_tps="<<tps<<" render_fps="<<fps<<" render_ms="<<renderMs<<" input_p95_ms="<<p95<<" interactions="<<inputLatenciesMs.size()<<" result="<<(passed?"PASS":"FAIL")<<"\r\n";const auto path=libraryPath().parent_path()/"ui-benchmark.txt";HANDLE file=CreateFileW(path.c_str(),GENERIC_WRITE,FILE_SHARE_READ,nullptr,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);if(file!=INVALID_HANDLE_VALUE){const auto value=report.str();DWORD written=0;WriteFile(file,value.data(),DWORD(value.size()),&written,nullptr);CloseHandle(file);}}
 
 constexpr int SkiaResourceId = 101;
 
@@ -130,6 +143,7 @@ void applyTool(int screenX, int screenY) {
 }
 
 void render(HWND window, HDC dc) {
+  const auto renderStarted=std::chrono::steady_clock::now();
   std::shared_lock simulationLock(simulationMutex);
   RECT client{}; GetClientRect(window, &client);
   const int width = std::max(1L, client.right), height = std::max(1L, client.bottom);
@@ -149,7 +163,8 @@ void render(HWND window, HDC dc) {
   rectangle(canvas,paint,0,0,contentRight,headerHeight,0xff416788);rectangle(canvas,paint,0,headerHeight,contentRight,float(height),0xff121d29);rectangle(canvas,paint,contentRight,0,float(width),float(height),0xff3a4b68);
   const auto metrics=simulation.metrics();
   const int stageLeft=0,stageTop=int(headerHeight),stageRight=std::max(0,int(contentRight)),stageBottom=height;
-  for(int screenY=stageTop;screenY<stageBottom;++screenY){const int worldY=int((screenY-stageTop-cameraY)/zoom);if(worldY<0||worldY>=life::WorldHeight)continue;auto* destination=pixels.data()+size_t(screenY)*width;const auto climate=life::climateAt(worldY,life::WorldHeight,metrics.ticks);for(int screenX=stageLeft;screenX<stageRight;++screenX){const int worldX=int((screenX-cameraX)/zoom);if(worldX<0||worldX>=life::WorldWidth)continue;const int index=worldY*life::WorldWidth+worldX;const auto terrain=simulation.world.terrain[index],resource=simulation.world.resources[index],cell=simulation.cells[index];uint32_t base=terrainColors[terrain];if(activeOverlay==Overlay::Resources)base=resource?resourceColors[resource]:0xff202d3b;else if(activeOverlay==Overlay::Productivity){const double terrainFactor=terrain==uint8_t(life::TerrainType::Fertile)?1.35:terrain==uint8_t(life::TerrainType::Desert)?.3:terrain==uint8_t(life::TerrainType::Plains)?1.0:0.0;const int green=std::clamp(int(45+145*climate.fertility*terrainFactor/1.82),35,190);base=0xff202020u|uint32_t(green)<<8;}else if(activeOverlay==Overlay::Climate){const int red=int(45+190*climate.temperature),blue=int(45+190*(1-climate.temperature));base=0xff000000u|uint32_t(red)<<16|0x00282800u|uint32_t(blue);}destination[screenX]=cell?cellColors[cell]:(activeOverlay==Overlay::Resources&&resource)?resourceColors[resource]:base;}}
+  const int renderStride=zoom<=1.25f?2:1;
+  for(int screenY=stageTop;screenY<stageBottom;screenY+=renderStride){const int worldY=int((screenY-stageTop-cameraY)/zoom);if(worldY<0||worldY>=life::WorldHeight)continue;const auto climate=life::climateAt(worldY,life::WorldHeight,metrics.ticks);for(int screenX=stageLeft;screenX<stageRight;screenX+=renderStride){const int worldX=int((screenX-cameraX)/zoom);if(worldX<0||worldX>=life::WorldWidth)continue;const int index=worldY*life::WorldWidth+worldX;const auto terrain=simulation.world.terrain[index],resource=simulation.world.resources[index];uint8_t cell=simulation.cells[index];if(renderStride>1&&!cell){const int nextX=std::min(worldX+1,life::WorldWidth-1),nextY=std::min(worldY+1,life::WorldHeight-1);cell=std::max({simulation.cells[worldY*life::WorldWidth+nextX],simulation.cells[nextY*life::WorldWidth+worldX],simulation.cells[nextY*life::WorldWidth+nextX]});}uint32_t base=terrainColors[terrain];if(activeOverlay==Overlay::Resources)base=resource?resourceColors[resource]:0xff202d3b;else if(activeOverlay==Overlay::Productivity){const double terrainFactor=terrain==uint8_t(life::TerrainType::Fertile)?1.35:terrain==uint8_t(life::TerrainType::Desert)?.3:terrain==uint8_t(life::TerrainType::Plains)?1.0:0.0;const int green=std::clamp(int(45+145*climate.fertility*terrainFactor/1.82),35,190);base=0xff202020u|uint32_t(green)<<8;}else if(activeOverlay==Overlay::Climate){const int red=int(45+190*climate.temperature),blue=int(45+190*(1-climate.temperature));base=0xff000000u|uint32_t(red)<<16|0x00282800u|uint32_t(blue);}const uint32_t color=cell?cellColors[cell]:(activeOverlay==Overlay::Resources&&resource)?resourceColors[resource]:base;for(int fillY=screenY;fillY<std::min(screenY+renderStride,stageBottom);++fillY){auto* destination=pixels.data()+size_t(fillY)*width;std::fill(destination+screenX,destination+std::min(screenX+renderStride,stageRight),color);}}}
   text(canvas,paint,"EVOLUTION, ACCELERATED",30,30,10,0xff81d2c7,true);text(canvas,paint,"Life Engine",30,65,28,0xffffffff,true);text(canvas,paint,"NNUE",176,65,28,0xff81d2c7,true);rectangle(canvas,paint,contentRight-96,37,contentRight-88,45,paused.load()?0xff9099c2:0xff81d2c7);text(canvas,paint,paused.load()?"PAUSED":"RUNNING",contentRight-78,47,12,0xffffffff,false);
   const float panelX=contentRight+15,panelRight=width-15,cardGap=8,cardWidth=(aside-38)/2;
   for (int column = 0; column < 2; ++column)
@@ -164,7 +179,7 @@ void render(HWND window, HDC dc) {
   rectangle(canvas,paint,24,float(height-52),320,float(height-20),0xee121d29);text(canvas,paint,"Terrain + resources + evolving organisms",38,float(height-31),11,0xffffffff);
   api->paintDelete(paint);api->surfaceUnref(surface);
   StretchDIBits(dc, 0, 0, width, height, 0, 0, width, height, pixels.data(), &bitmap, DIB_RGB_COLORS, SRCCOPY);
-  ++measuredFrames;
+  ++measuredFrames;if(uiBenchmark){++uiBenchmarkFrames;uiBenchmarkRenderMs+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-renderStarted).count();if(pendingInput){inputLatenciesMs.push_back(std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-*pendingInput).count());pendingInput.reset();}}
 }
 
 LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
@@ -172,8 +187,9 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wParam, LPARAM lPar
   if (message == WM_SIZE) { InvalidateRect(window, nullptr, FALSE); return 0; }
   if (message == WM_TIMER) {
     const auto now=std::chrono::steady_clock::now();
+    if(uiBenchmark&&now>=nextBenchmarkInput){const auto inputStart=now;{std::unique_lock lock(simulationMutex);const int x=int((uiBenchmarkInputs*37)%life::WorldWidth),y=int((uiBenchmarkInputs*53)%life::WorldHeight);simulation.paintResource(x,y,life::ResourceType::Plant,1000);}++uiBenchmarkInputs;pendingInput=inputStart;nextBenchmarkInput=now+std::chrono::milliseconds(250);InvalidateRect(window,nullptr,FALSE);}
     const double sampleSeconds=std::chrono::duration<double>(now-measurementStart).count();if(sampleSeconds>=1.0){measuredTps=measuredTicks.exchange(0)/sampleSeconds;measuredFps=measuredFrames/sampleSeconds;measuredFrames=0;measurementStart=now;}
-    if(std::chrono::duration<double>(now-lastRenderRequest).count()>=1.0/60.0){InvalidateRect(window,nullptr,FALSE);lastRenderRequest=now;}return 0;
+    InvalidateRect(window,nullptr,FALSE);lastRenderRequest=now;if(uiBenchmark&&std::chrono::duration<double>(now-uiBenchmarkStart).count()>=uiBenchmarkSeconds){writeUiBenchmarkReport();DestroyWindow(window);}return 0;
   }
   if (message == WM_LBUTTONDOWN || message == WM_MBUTTONDOWN) {
     const int mouseX=GET_X_LPARAM(lParam),mouseY=GET_Y_LPARAM(lParam);RECT client{};GetClientRect(window,&client);const float aside=std::min(390.0f,client.right*.32f),contentRight=client.right-aside,panelX=contentRight+15,panelRight=client.right-15;
@@ -207,7 +223,8 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wParam, LPARAM lPar
 }
 }
 
-int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int show) {
+int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR commandLine, int show) {
+  const std::wstring arguments=commandLine?commandLine:L"";if(const auto marker=arguments.find(L"--ui-benchmark");marker!=std::wstring::npos){uiBenchmark=true;const auto equals=arguments.find(L'=',marker);if(equals!=std::wstring::npos)uiBenchmarkSeconds=std::clamp(_wtoi(arguments.c_str()+equals+1),1,600);simulation.seedBenchmarkMovers(10'000);requestedTps.store(60);}
   try { api = loadSkia(); }
   catch (...) { MessageBoxW(nullptr, L"The embedded Skia renderer could not be loaded.", L"Life Engine", MB_ICONERROR); return 1; }
   fontManager=api->fontManagerCreateDefault();auto normal=api->fontStyleNew(400,5,0),bold=api->fontStyleNew(700,5,0);regularTypeface=api->fontManagerCreateTypeface(fontManager,"Arial",normal);boldTypeface=api->fontManagerCreateTypeface(fontManager,"Arial",bold);api->fontStyleDelete(normal);api->fontStyleDelete(bold);
@@ -217,9 +234,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int show) {
   HWND window = CreateWindowExW(0, type.lpszClassName, L"Life Engine NNUE",
     WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 1500, 900, nullptr, nullptr, instance, nullptr);
   ShowWindow(window, show);
-  simulationThread=std::jthread([](std::stop_token stop){auto next=std::chrono::steady_clock::now();while(!stop.stop_requested()){if(paused.load()){next=std::chrono::steady_clock::now();std::this_thread::sleep_for(std::chrono::milliseconds(2));continue;}const int target=std::max(1,requestedTps.load());const auto interval=std::chrono::duration<double>(1.0/target);const auto now=std::chrono::steady_clock::now();if(now<next){std::this_thread::sleep_until(next);continue;}{std::unique_lock lock(simulationMutex);simulation.step();}measuredTicks.fetch_add(1);next+=std::chrono::duration_cast<std::chrono::steady_clock::duration>(interval);if(std::chrono::steady_clock::now()-next>std::chrono::milliseconds(250))next=std::chrono::steady_clock::now();}});
+  timeBeginPeriod(1);
+  if(uiBenchmark){uiBenchmarkStart=nextBenchmarkInput=measurementStart=lastRenderRequest=std::chrono::steady_clock::now();uiBenchmarkTicks.store(0);uiBenchmarkFrames=uiBenchmarkInputs=measuredFrames=0;uiBenchmarkRenderMs=0;inputLatenciesMs.clear();pendingInput.reset();}
+  simulationThread=std::jthread([](std::stop_token stop){auto next=std::chrono::steady_clock::now();while(!stop.stop_requested()){if(paused.load()){next=std::chrono::steady_clock::now();std::this_thread::sleep_for(std::chrono::milliseconds(2));continue;}const int target=std::max(1,requestedTps.load());const auto interval=std::chrono::duration<double>(1.0/target);const auto now=std::chrono::steady_clock::now();if(now<next){std::this_thread::sleep_until(next);continue;}{std::unique_lock lock(simulationMutex);simulation.step();}measuredTicks.fetch_add(1);if(uiBenchmark)uiBenchmarkTicks.fetch_add(1);next+=std::chrono::duration_cast<std::chrono::steady_clock::duration>(interval);if(std::chrono::steady_clock::now()-next>std::chrono::milliseconds(250))next=std::chrono::steady_clock::now();}});
   SetTimer(window, 1, 8, nullptr);
   MSG message{}; while (GetMessageW(&message, nullptr, 0, 0) > 0) { TranslateMessage(&message); DispatchMessageW(&message); }
-  simulationThread.request_stop();simulationThread.join();
+  simulationThread.request_stop();simulationThread.join();timeEndPeriod(1);
   if(regularTypeface)api->typefaceUnref(regularTypeface);if(boldTypeface)api->typefaceUnref(boldTypeface);if(fontManager)api->fontManagerUnref(fontManager);api.reset(); return int(message.wParam);
 }
