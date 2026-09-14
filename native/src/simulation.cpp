@@ -10,8 +10,8 @@ constexpr std::array<std::pair<int,int>,4> directions{{{0,-1},{0,1},{-1,0},{1,0}
 const char* cellName(CellType type){constexpr const char* names[]={"empty","food","wall","mouth","producer","mover","killer","armor","plant mouth","scavenger mouth","mineral mouth","inert tissue"};const int index=int(type);return index>=0&&index<int(std::size(names))?names[index]:"unknown";}
 }
 
-NativeSimulation::NativeSimulation(int width, int height, double foodChance, int lifespan, uint32_t worldSeed, uint32_t randomSeed)
-  : width_(width), height_(height), worldSeed_(worldSeed), random_(randomSeed), foodChance_(foodChance), lifespan_(lifespan),
+NativeSimulation::NativeSimulation(int width, int height, double foodChance, int lifespan, uint32_t worldSeed, uint32_t randomSeed, int lineageLimit)
+  : width_(width), height_(height), worldSeed_(worldSeed), random_(randomSeed), foodChance_(foodChance), lifespan_(lifespan),lineageLimit_(std::max(0,lineageLimit)),
     climateTemperature_(height),climateFertility_(height),climateGradient_(height),climateBand_(height),world(generateWorld(width, height, worldSeed)), cells(width * height), owners(width * height, -1) { organisms_.reserve(100'000);reset(); }
 
 void NativeSimulation::updateClimateCache(){const double wave=std::sin(cyclePhase(ticks_)*std::numbers::pi*2.0),step=2.0/std::max(1,height_-1);const int direction=std::abs(wave*step)<.002?0:wave>0?-1:1;for(int y=0;y<height_;++y){const double latitude=1.0-2.0*y/std::max(1,height_-1),value=std::clamp(.5+.5*latitude*wave,0.0,1.0);climateTemperature_[y]=float(value);climateFertility_[y]=float(.35+value);climateGradient_[y]=int8_t(direction);climateBand_[y]=uint8_t(std::min(4,int(std::floor(value*5.0))));}}
@@ -90,9 +90,27 @@ std::optional<OrganismInspection> NativeSimulation::inspect(int id) const {
   result.id=organism->id;result.parentId=organism->parentId;result.generation=organism->generation;result.birthTick=organism->birthTick;result.deathTick=organism->deathTick;result.age=organism->lifetime;result.cellCount=int(organism->cells.size());result.energy=organism->energy;result.minerals=organism->minerals;result.damage=organism->damage;result.mutability=organism->mutability;result.neuralMutability=organism->neuralMutability;result.alive=organism->living;result.isMover=organism->isMover;result.thermalStress=organism->thermalStress;result.perceptionRadius=organism->perceptionRadius;result.senseChannels=organism->senseChannels;result.neuralCost=organism->neuralCost;result.mutations=organism->mutations;result.senses=organism->lastFeatures;result.outputs=organism->lastOutputs;result.hasOutputs=organism->lastAction>=0;constexpr const char* actions[]={"Up","Down","Left","Right","Wait"};result.action=organism->lastAction>=0&&organism->lastAction<5?actions[organism->lastAction]:"Static";
   for(int parent=organism->parentId;parent>=0;){const auto* ancestor=findAny(parent);if(!ancestor)break;result.ancestors.insert(result.ancestors.begin(),{ancestor->id,ancestor->generation,ancestor->living});parent=ancestor->parentId;}
   for(const auto& candidate:organisms_){if(candidate.id==id)continue;for(int parent=candidate.parentId;parent>=0;){if(parent==id){result.descendants.push_back({candidate.id,candidate.generation,candidate.living});break;}const auto* ancestor=findAny(parent);if(!ancestor)break;parent=ancestor->parentId;}}
+  result.totalDescendants=organism->totalDescendants;
   result.totalDescendants=int(result.descendants.size());const int row=std::clamp(organism->y,0,height_-1),index=safeIndex(organism->x,organism->y);result.temperature=climateTemperature_[row];result.fertility=climateFertility_[row];constexpr const char* terrainNames[]={"Plains","Fertile","Desert","Water","Mountain"};constexpr const char* resourceNames[]={"None","Plant","Carrion","Mineral"};result.terrain=index>=0?terrainNames[world.terrain[index]]:"Unknown";result.resource=index>=0?resourceNames[world.resources[index]]:"None";
   bool plant=false,carrion=false,mineral=false;for(const auto& cell:organism->cells){plant|=cell.type==CellType::Mouth||cell.type==CellType::PlantMouth;carrion|=cell.type==CellType::ScavengerMouth;mineral|=cell.type==CellType::MineralMouth;if(cell.type==CellType::Killer)result.attackDurability+=cell.durability;if(cell.type==CellType::Armor)result.armorDurability+=cell.durability;}if(plant)result.diet="Plant";if(carrion)result.diet+=(result.diet.empty()?"":" + ")+std::string("Carrion");if(mineral)result.diet+=(result.diet.empty()?"":" + ")+std::string("Mineral");if(result.diet.empty())result.diet="None";result.metabolicCost=result.cellCount*CellBaseCost+(organism->isMover?MoveCost:0)+organism->neuralCost/20.0;return result;
 }
+
+void NativeSimulation::pruneLineage() {
+  const int DeadRecordLimit=lineageLimit_;
+  if(deadCount_<=DeadRecordLimit)return;
+  std::unordered_map<int,size_t> allSlots;allSlots.reserve(organisms_.size());
+  std::unordered_map<int,int> childCounts;childCounts.reserve(organisms_.size());
+  for(size_t index=0;index<organisms_.size();++index){allSlots[organisms_[index].id]=index;if(organisms_[index].parentId>=0)++childCounts[organisms_[index].parentId];}
+  std::unordered_set<int> protectedIds;protectedIds.reserve(organisms_.size());
+  const auto protect=[&](int id){while(id>=0&&protectedIds.insert(id).second){const auto found=allSlots.find(id);if(found==allSlots.end())break;id=organisms_[found->second].parentId;}};
+  for(const auto& organism:organisms_)if(organism.living)protect(organism.id);protect(selectedId_);
+  std::unordered_set<int> removed;removed.reserve(size_t(deadCount_-DeadRecordLimit));bool progress=true;
+  while(deadCount_>DeadRecordLimit&&progress){progress=false;for(const auto& organism:organisms_){if(deadCount_<=DeadRecordLimit)break;if(organism.living||protectedIds.contains(organism.id)||removed.contains(organism.id)||childCounts[organism.id]>0)continue;removed.insert(organism.id);--deadCount_;if(organism.parentId>=0)--childCounts[organism.parentId];progress=true;}}
+  if(removed.empty())return;
+  organisms_.erase(std::remove_if(organisms_.begin(),organisms_.end(),[&](const Organism& organism){return removed.contains(organism.id);}),organisms_.end());
+  slotById_.clear();for(size_t index=0;index<organisms_.size();++index)if(organisms_[index].living)slotById_[organisms_[index].id]=index;
+}
+
 void NativeSimulation::eat(Organism& organism, CellType mouth, int x, int y) {
   for(const auto [dx,dy]:directions){const int index=safeIndex(x+dx,y+dy);if(index<0)continue;const auto resource=ResourceType(world.resources[index]);
     const bool compatible=((mouth==CellType::Mouth||mouth==CellType::PlantMouth)&&resource==ResourceType::Plant)||(mouth==CellType::ScavengerMouth&&resource==ResourceType::Carrion)||(mouth==CellType::MineralMouth&&resource==ResourceType::Mineral);
@@ -157,7 +175,7 @@ void NativeSimulation::reproduce(Organism& parent) {
   if(isClear(child,child.x,child.y,child.rotation)&&straightPath(child.x,child.y,parent.x,parent.y,parent)){parent.minerals-=growthMinerals;largest_=std::max(largest_,int(child.cells.size()));organisms_.push_back(std::move(child));slotById_[organisms_.back().id]=organisms_.size()-1;placeBody(organisms_.back());}
   parent.energy=std::max(0,parent.energy-transferredEnergy);parent.minerals=std::max(0,parent.minerals-transferredMinerals);
 }
-void NativeSimulation::die(Organism& organism){if(!organism.living)return;organism.deathTick=ticks_;for(const auto& cell:organism.cells){const auto [rx,ry]=rotated(cell.x,cell.y,organism.rotation);const int index=safeIndex(organism.x+rx,organism.y+ry);if(index>=0&&owners[index]==organism.id){cells[index]=uint8_t(CellType::Empty);owners[index]=-1;world.resources[index]=uint8_t(ResourceType::Carrion);world.resourceAmount[index]=uint16_t(std::min(65535,int(world.resourceAmount[index])+200+organism.energy/std::max(1,int(organism.cells.size()))/20));}}organism.living=false;slotById_.erase(organism.id);}
+void NativeSimulation::die(Organism& organism){if(!organism.living)return;organism.deathTick=ticks_;++deadCount_;for(const auto& cell:organism.cells){const auto [rx,ry]=rotated(cell.x,cell.y,organism.rotation);const int index=safeIndex(organism.x+rx,organism.y+ry);if(index>=0&&owners[index]==organism.id){cells[index]=uint8_t(CellType::Empty);owners[index]=-1;world.resources[index]=uint8_t(ResourceType::Carrion);world.resourceAmount[index]=uint16_t(std::min(65535,int(world.resourceAmount[index])+200+organism.energy/std::max(1,int(organism.cells.size()))/20));}}organism.living=false;slotById_.erase(organism.id);}
 void NativeSimulation::updateOrganism(Organism& organism) {
   if(!organism.living)return;++organism.lifetime;organism.energy-=int(organism.cells.size())*CellBaseCost;
   const int climateRow=std::clamp(organism.y,0,height_-1);const double temperature=climateTemperature_[climateRow];const int home=safeIndex(organism.x,organism.y);const bool desert=home>=0&&TerrainType(world.terrain[home])==TerrainType::Desert;
@@ -170,6 +188,18 @@ void NativeSimulation::updateOrganism(Organism& organism) {
   if(organism.isConsumer||organism.isProducer||organism.isAttacker)for(auto& local:organism.cells){const auto [rx,ry]=rotated(local.x,local.y,organism.rotation);const int x=organism.x+rx,y=organism.y+ry;if(local.type==CellType::Mouth||local.type==CellType::PlantMouth||local.type==CellType::ScavengerMouth||local.type==CellType::MineralMouth)eat(organism,local.type,x,y);else if(local.type==CellType::Producer)produce(organism,x,y);else if(local.type==CellType::Killer)attack(organism,local,x,y);}
   if(!organism.living||!organism.isMover||!organism.brain)return;const int interval=std::clamp(int(std::ceil(organism.neuralCost/16.0)),1,16);if((ticks_+organism.id)%interval==0){++nnueEvaluations_;organism.energy=std::max(0,organism.energy-int(std::ceil(organism.neuralCost/20.0)));organism.lastFeatures=features(organism);organism.lastOutputs=organism.brain->evaluate(organism.lastFeatures);int best=0;for(int action=1;action<OutputSize;++action)if(organism.lastOutputs[action]>organism.lastOutputs[best])best=action;organism.lastAction=best;organism.direction=best;}if(organism.direction>=4)return;++organism.moveCount;organism.energy=std::max(0,organism.energy-MoveCost);attemptMove(organism);if(organism.moveCount>organism.moveRange)attemptRotate(organism);
 }
-void NativeSimulation::step(int count) { for(int iteration=0;iteration<count;++iteration){++ticks_;updateClimateCache();const size_t activeCount=organisms_.size();for(size_t index=0;index<activeCount;++index)updateOrganism(organisms_[index]);int living=0;for(const auto& organism:organisms_)living+=organism.living;record_=std::max(record_,living);} }
+void NativeSimulation::step(int count) {
+  for(int iteration=0;iteration<count;++iteration){
+    ++ticks_;updateClimateCache();const size_t activeCount=organisms_.size();
+    for(size_t index=0;index<activeCount;++index){
+      const size_t before=organisms_.size();updateOrganism(organisms_[index]);
+      for(size_t childIndex=before;childIndex<organisms_.size();++childIndex){
+        int ancestorId=organisms_[childIndex].parentId;
+        while(ancestorId>=0){const auto ancestor=std::find_if(organisms_.begin(),organisms_.end(),[&](const Organism& value){return value.id==ancestorId;});if(ancestor==organisms_.end())break;++ancestor->totalDescendants;ancestorId=ancestor->parentId;}
+      }
+    }
+    if(deadCount_>lineageLimit_)pruneLineage();int living=0;for(const auto& organism:organisms_)living+=organism.living;record_=std::max(record_,living);
+  }
+}
 NativeMetrics NativeSimulation::metrics() const { double energy=0;int living=0;for(const auto& organism:organisms_)if(organism.living){energy+=organism.energy;++living;}const auto climate=climateAt(height_/2,height_,ticks_);return{living,record_,resets_,ticks_,largest_,living?energy/living/EnergyScale:0,climate.temperature,climate.fertility,nnueEvaluations_}; }
 }

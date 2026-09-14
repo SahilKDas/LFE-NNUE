@@ -43,7 +43,7 @@ struct NativeMetrics { int organisms{}, record{}, generation{}, ticks{}, largest
 
 class NativeSimulation {
   int width_, height_; uint32_t worldSeed_; Mulberry32 random_; int nextId_{1}, ticks_{}, resets_{}, record_{}, largest_{}, selectedId_{-1}, deadCount_{};
-  double foodChance_; int lifespan_, nnueEvaluations_{}; std::vector<Organism> organisms_;
+  double foodChance_; int lifespan_, lineageLimit_, nnueEvaluations_{}; std::vector<Organism> organisms_;
   bool reproductionEnabled_{true}, mortalityEnabled_{true};
   std::unordered_map<int,size_t> slotById_;
   std::vector<float> climateTemperature_, climateFertility_; std::vector<int8_t> climateGradient_; std::vector<uint8_t> climateBand_;
@@ -75,7 +75,7 @@ public:
   WorldLayers world;
   std::vector<uint8_t> cells;
   std::vector<int32_t> owners;
-  NativeSimulation(int width, int height, double foodChance, int lifespan, uint32_t worldSeed, uint32_t randomSeed);
+  NativeSimulation(int width, int height, double foodChance, int lifespan, uint32_t worldSeed, uint32_t randomSeed, int lineageLimit = 20'000);
   void reset();
   void regenerate(uint32_t seed);
   int seedBenchmarkMovers(int count);
@@ -86,6 +86,8 @@ public:
   std::optional<OrganismInspection> inspect(int id) const;
   void step(int count = 1);
   NativeMetrics metrics() const;
+  int lineageRecordCount() const { return int(organisms_.size()); }
+  int deadLineageRecordCount() const { return deadCount_; }
   const std::vector<Organism>& organisms() const { return organisms_; }
 };
 }

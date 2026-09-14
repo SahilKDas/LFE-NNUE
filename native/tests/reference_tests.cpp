@@ -68,6 +68,7 @@ int main() {
   for(int checkpoint=0;checkpoint<10;++checkpoint){simulation.step(100);const auto current=simulation.metrics();if(current.organisms!=populations[checkpoint]){std::cerr<<"FAIL: native tick-"<<(1100+checkpoint*100)<<" population mismatch (actual "<<current.organisms<<", expected "<<populations[checkpoint]<<")\n";++failures;}if(current.nnueEvaluations!=evaluations[checkpoint]){std::cerr<<"FAIL: native tick-"<<(1100+checkpoint*100)<<" NNUE count mismatch (actual "<<current.nnueEvaluations<<", expected "<<evaluations[checkpoint]<<")\n";++failures;}}
   check(simulation.metrics().record==823,"native tick-2000 population record mismatch");
   near(simulation.metrics().averageEnergy,18.353055979643766,1e-12,"native tick-2000 energy mismatch");
+  life::NativeSimulation prunedLineage(96,60,.2,500,524114809,334462,5);prunedLineage.select(1);prunedLineage.step(2'000);check(prunedLineage.metrics().organisms==simulation.metrics().organisms,"lineage pruning changed living population");near(prunedLineage.metrics().averageEnergy,simulation.metrics().averageEnergy,1e-12,"lineage pruning changed simulation energy");check(prunedLineage.lineageRecordCount()<simulation.lineageRecordCount(),"lineage pruning did not remove dead leaves");check(prunedLineage.inspect(1).has_value(),"selected lineage record was pruned");
   if (!failures) std::cout << "Native deterministic substrate matches the frozen TypeScript contract.\n";
   return failures ? 1 : 0;
 }
