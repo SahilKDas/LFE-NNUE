@@ -44,7 +44,7 @@ struct NativeMetrics {
   int organisms{},record{},generation{},ticks{},largest{};
   double averageEnergy{},averageMutation{},averageStress{},temperature{},fertility{};
   int plantEaters{},scavengers{},mineralEaters{},predators{},nnueEvaluations{};
-  size_t memoryEstimate{};
+  size_t memoryEstimate{};int awakeRegions{},sleepingRegions{},dirtyTiles{};
 };
 
 class NativeSimulation {
@@ -53,8 +53,19 @@ class NativeSimulation {
   bool reproductionEnabled_{true}, mortalityEnabled_{true};
   std::unordered_map<int,size_t> slotById_;
   std::vector<size_t> activeSlots_;
+  static constexpr int RegionSize=32,DirtyTileSize=16;
+  int regionColumns_{},regionRows_{},dirtyColumns_{},dirtyRows_{};
+  std::vector<std::vector<size_t>> regionBatches_;
+  std::vector<uint8_t> regionAwake_,dirtyTiles_;
+  std::vector<uint32_t> dirtyVersions_;
   std::vector<float> climateTemperature_, climateFertility_; std::vector<int8_t> climateGradient_; std::vector<uint8_t> climateBand_;
   int safeIndex(int x, int y) const;
+  int wrappedIndex(int x,int y) const;
+  int wrapX(int x) const;
+  int wrapY(int y) const;
+  void markDirtyIndex(int index);
+  void markAllDirty();
+  void rebuildRegionIndex();
   std::pair<int,int> rotated(int x, int y, int direction) const;
   void placeBody(const Organism& organism);
   void refreshCapabilities(Organism& organism);
@@ -93,6 +104,9 @@ public:
   std::optional<OrganismInspection> inspect(int id) const;
   void step(int count = 1);
   NativeMetrics metrics() const;
+  std::vector<uint16_t> takeDirtyTiles();
+  std::vector<uint16_t> changedTiles(std::vector<uint32_t>& knownVersions) const;
+  static constexpr int dirtyTileSize(){return DirtyTileSize;}
   int lineageRecordCount() const { return int(organisms_.size()); }
   int deadLineageRecordCount() const { return deadCount_; }
   const std::vector<Organism>& organisms() const { return organisms_; }
