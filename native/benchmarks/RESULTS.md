@@ -7,7 +7,15 @@ life_engine_native_benchmark.exe 60
 organisms=10000 elapsed_s=60.00 ticks=28216 measured_tps=470.26 nnue_eval_s=592029.96
 ```
 
-This isolated release-gate sample uses deterministic multi-cell organisms with mixed mouth types, killers, armor, producers, perception radii, and channel masks on the 1024x640 layered world. It shares an immutable NNUE genome and disables reproduction and mortality so population size remains controlled while climate, physiology, resources, combat interactions, perception, inference, collision, and movement execute normally. The result exceeds the 60-TPS target by 7.8x.
+This historical result used a shared NNUE and disabled reproduction and mortality. It is retained only for comparison and is no longer an acceptance result.
+
+Plant-inclusive diverse ecology sample, 2026-09-16:
+
+```text
+organisms=9997 elapsed_s=5.00 ticks=691 measured_tps=138.06 nnue_eval_s=161896.70 brain_families=732 plant_tiles=39339 births=2865 deaths=2857
+```
+
+The current gate uses independently evolving brain families, mixed moving organisms, stationary producers, active plant generation, reproduction, mutation, combat, aging, starvation, and mortality. Population capacity prevents runaway growth but does not disable lifecycle physics.
 
 Integrated native UI acceptance sample, 2026-09-13:
 

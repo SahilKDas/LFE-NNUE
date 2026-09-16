@@ -50,7 +50,8 @@ struct NativeMetrics {
 class NativeSimulation {
   int width_, height_; uint32_t worldSeed_; Mulberry32 random_; int nextId_{1}, ticks_{}, resets_{}, record_{}, largest_{}, selectedId_{-1}, deadCount_{};
   double foodChance_; int lifespan_, lineageLimit_, nnueEvaluations_{}; std::vector<Organism> organisms_;
-  bool reproductionEnabled_{true}, mortalityEnabled_{true};
+  bool reproductionEnabled_{true}, mortalityEnabled_{true}; int populationTarget_{};
+  int births_{};
   std::unordered_map<int,size_t> slotById_;
   std::vector<size_t> activeSlots_;
   static constexpr int RegionSize=32,DirtyTileSize=16;
@@ -109,6 +110,7 @@ public:
   static constexpr int dirtyTileSize(){return DirtyTileSize;}
   int lineageRecordCount() const { return int(organisms_.size()); }
   int deadLineageRecordCount() const { return deadCount_; }
+  int birthCount() const { return births_; }
   const std::vector<Organism>& organisms() const { return organisms_; }
 };
 }
