@@ -16,6 +16,8 @@ NativeSimulation::NativeSimulation(int width, int height, double foodChance, int
 
 void NativeSimulation::updateClimateCache(){const double wave=std::sin(cyclePhase(ticks_)*std::numbers::pi*2.0),step=2.0/std::max(1,height_-1);const int direction=std::abs(wave*step)<.002?0:wave>0?-1:1;for(int y=0;y<height_;++y){const double latitude=1.0-2.0*y/std::max(1,height_-1),value=std::clamp(.5+.5*latitude*wave,0.0,1.0);climateTemperature_[y]=float(value);climateFertility_[y]=float(.35+value);climateGradient_[y]=int8_t(direction);climateBand_[y]=uint8_t(std::min(4,int(std::floor(value*5.0))));}}
 
+void NativeSimulation::updateAtmosphere(){size_t livingCells=0,movers=0,producers=0;for(const size_t slot:activeSlots_){if(slot==SIZE_MAX||slot>=organisms_.size())continue;const auto& organism=organisms_[slot];if(!organism.living)continue;livingCells+=organism.cells.size();movers+=organism.isMover;for(const auto& cell:organism.cells)producers+=cell.type==CellType::Producer;}const double respiration=(double(livingCells)+double(movers)*2.0)*3e-9,photosynthesis=double(producers)*7e-9;atmosphericOxygen_=std::clamp(atmosphericOxygen_+photosynthesis-respiration,.05,.25);carbonDioxide_=std::clamp(carbonDioxide_+respiration*.65-photosynthesis*.55,.0004,.15);}
+
 int NativeSimulation::safeIndex(int x, int y) const { return x >= 0 && y >= 0 && x < width_ && y < height_ ? y * width_ + x : -1; }
 int NativeSimulation::wrapX(int x) const{if(unsigned(x)<unsigned(width_))return x;if(x<0&&x>=-width_)return x+width_;if(x>=width_&&x<width_*2)return x-width_;return (x%width_+width_)%width_;}
 int NativeSimulation::wrapY(int y) const{if(unsigned(y)<unsigned(height_))return y;if(y<0&&y>=-height_)return y+height_;if(y>=height_&&y<height_*2)return y-height_;return (y%height_+height_)%height_;}
@@ -38,7 +40,7 @@ void NativeSimulation::refreshCapabilities(Organism& organism) {
   if(organism.isMover&&!organism.brain)organism.brain=std::make_shared<Nnue>(random_);else if(!organism.isMover)organism.brain.reset();
 }
 void NativeSimulation::reset() {
-  reproductionEnabled_=mortalityEnabled_=true;populationTarget_=std::min(10'000,width_*height_);births_=0;selectedId_=-1;deadCount_=0;std::fill(cells.begin(),cells.end(),uint8_t(CellType::Empty));std::fill(owners.begin(),owners.end(),-1);organisms_.clear();slotById_.clear();activeSlots_.clear();ticks_=0;++resets_;markAllDirty();
+  reproductionEnabled_=mortalityEnabled_=true;populationTarget_=0;births_=0;atmosphericOxygen_=.21;carbonDioxide_=.0004;selectedId_=-1;deadCount_=0;std::fill(cells.begin(),cells.end(),uint8_t(CellType::Empty));std::fill(owners.begin(),owners.end(),-1);organisms_.clear();slotById_.clear();activeSlots_.clear();ticks_=0;++resets_;markAllDirty();
   Organism organism;organism.id=nextId_++;organism.x=width_/2;organism.y=height_/2;
   organism.cells={{CellType::Mouth,0,0,0},{CellType::Producer,-1,-1,0},{CellType::Producer,1,1,0}};
   refreshCapabilities(organism);largest_=std::max(largest_,int(organism.cells.size()));organism.activeIndex=activeSlots_.size();activeSlots_.push_back(organisms_.size());organisms_.push_back(std::move(organism));slotById_[organisms_.back().id]=organisms_.size()-1;placeBody(organisms_.back());rebuildRegionIndex();
@@ -199,6 +201,7 @@ void NativeSimulation::updateOrganism(Organism& organism) {
   const double discomfort=std::max(0.0,std::abs(temperature-.5)-.15);organism.energy=std::max(0,organism.energy-int(std::round(discomfort*30.0))-(desert?4:0));
   const double stressDelta=temperature>=.35&&temperature<=.65?-.004:.001+std::abs(temperature-(temperature<.35?.35:.65))*.012;organism.thermalStress=std::max(0.0,organism.thermalStress+stressDelta);
   if(organism.thermalStress>=1){organism.thermalStress-=1;if(mortalityEnabled_){++organism.damage;if(organism.damage>=int(organism.cells.size())){die(organism);return;}}}
+  const double oxygenDeficit=std::max(0.0,.16-atmosphericOxygen_);organism.hypoxiaStress=std::max(0.0,organism.hypoxiaStress+(oxygenDeficit>0?oxygenDeficit*.025:-.003));if(organism.hypoxiaStress>=1){organism.hypoxiaStress-=1;if(mortalityEnabled_){++organism.damage;if(organism.damage>=int(organism.cells.size())){die(organism);return;}}}
   if(mortalityEnabled_&&organism.lifetime>int(organism.cells.size())*lifespan_){die(organism);return;}
   if(organism.energy<=0){organism.energy=0;if(mortalityEnabled_){++organism.damage;if(organism.damage>=int(organism.cells.size())){die(organism);return;}}}
   if(reproductionEnabled_&&(!populationTarget_||int(activeSlots_.size())<populationTarget_)&&organism.energy>=int(organism.cells.size())*6*EnergyScale)reproduce(organism);
@@ -216,7 +219,7 @@ void NativeSimulation::step(int count) {
       }
     }
     if(deadCount_!=deathsBefore){activeSlots_.erase(std::remove(activeSlots_.begin(),activeSlots_.begin()+activeCount,SIZE_MAX),activeSlots_.begin()+activeCount);for(size_t index=0;index<activeSlots_.size();++index)organisms_[activeSlots_[index]].activeIndex=index;}
-    if((ticks_&7)==0||deadCount_!=deathsBefore||activeSlots_.size()!=activeCount)rebuildRegionIndex();
+    updateAtmosphere();if((ticks_&7)==0||deadCount_!=deathsBefore||activeSlots_.size()!=activeCount)rebuildRegionIndex();
     if(deadCount_>lineageLimit_)pruneLineage();record_=std::max(record_,int(activeSlots_.size()));
   }
 }
@@ -224,6 +227,6 @@ NativeMetrics NativeSimulation::metrics() const {
   double energy=0,mutation=0,stress=0;int living=0,plantEaters=0,scavengers=0,mineralEaters=0,predators=0;
   size_t memory=cells.capacity()*sizeof(uint8_t)+owners.capacity()*sizeof(int32_t)+world.terrain.capacity()*sizeof(uint8_t)+world.resources.capacity()*sizeof(uint8_t)+world.resourceAmount.capacity()*sizeof(uint16_t)+organisms_.capacity()*sizeof(Organism);
   for(size_t region=0;region<regionBatches_.size();++region){if(!regionAwake_[region])continue;for(const size_t slot:regionBatches_[region]){const auto& organism=organisms_[slot];energy+=organism.energy;mutation+=organism.mutability;stress+=organism.thermalStress;++living;memory+=organism.cells.capacity()*sizeof(BodyCell)+organism.mutations.capacity()*sizeof(std::string)+organism.lastFeatures.capacity()*sizeof(uint16_t);for(const auto& cell:organism.cells){if(cell.type==CellType::Mouth||cell.type==CellType::PlantMouth)++plantEaters;else if(cell.type==CellType::ScavengerMouth)++scavengers;else if(cell.type==CellType::MineralMouth)++mineralEaters;else if(cell.type==CellType::Killer)++predators;}}}
-  const auto climate=climateAt(height_/2,height_,ticks_);const int awake=int(std::count(regionAwake_.begin(),regionAwake_.end(),uint8_t(1))),dirty=int(std::count(dirtyTiles_.begin(),dirtyTiles_.end(),uint8_t(1)));return{living,record_,resets_,ticks_,largest_,living?energy/living/EnergyScale:0,living?mutation/living:0,living?stress/living:0,climate.temperature,climate.fertility,plantEaters,scavengers,mineralEaters,predators,nnueEvaluations_,memory,awake,int(regionAwake_.size())-awake,dirty};
+  const auto climate=climateAt(height_/2,height_,ticks_);const int awake=int(std::count(regionAwake_.begin(),regionAwake_.end(),uint8_t(1))),dirty=int(std::count(dirtyTiles_.begin(),dirtyTiles_.end(),uint8_t(1)));return{living,record_,resets_,ticks_,largest_,living?energy/living/EnergyScale:0,living?mutation/living:0,living?stress/living:0,climate.temperature,climate.fertility,atmosphericOxygen_,carbonDioxide_,plantEaters,scavengers,mineralEaters,predators,nnueEvaluations_,memory,awake,int(regionAwake_.size())-awake,dirty};
 }
 }

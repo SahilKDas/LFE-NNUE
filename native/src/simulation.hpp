@@ -18,6 +18,7 @@ struct Organism {
   int birthDistance{4}, moveRange{4}, moveCount{}, direction{}, rotation{};
   bool living{true}, isProducer{}, isMover{}, isConsumer{}, isAttacker{};
   double thermalStress{};
+  double hypoxiaStress{};
   int perceptionRadius{DefaultSensorRadius}; uint8_t senseChannels{DefaultSenseChannels}; int neuralCost{168};
   int totalDescendants{};
   std::vector<std::string> mutations;
@@ -43,6 +44,7 @@ struct OrganismInspection {
 struct NativeMetrics {
   int organisms{},record{},generation{},ticks{},largest{};
   double averageEnergy{},averageMutation{},averageStress{},temperature{},fertility{};
+  double oxygen{},carbonDioxide{};
   int plantEaters{},scavengers{},mineralEaters{},predators{},nnueEvaluations{};
   size_t memoryEstimate{};int awakeRegions{},sleepingRegions{},dirtyTiles{};
 };
@@ -50,6 +52,7 @@ struct NativeMetrics {
 class NativeSimulation {
   int width_, height_; uint32_t worldSeed_; Mulberry32 random_; int nextId_{1}, ticks_{}, resets_{}, record_{}, largest_{}, selectedId_{-1}, deadCount_{};
   double foodChance_; int lifespan_, lineageLimit_, nnueEvaluations_{}; std::vector<Organism> organisms_;
+  double atmosphericOxygen_{.21},carbonDioxide_{.0004};
   bool reproductionEnabled_{true}, mortalityEnabled_{true}; int populationTarget_{};
   int births_{};
   std::unordered_map<int,size_t> slotById_;
@@ -89,6 +92,7 @@ class NativeSimulation {
   bool attemptRotate(Organism& organism);
   void clearBody(const Organism& organism);
   void updateClimateCache();
+  void updateAtmosphere();
   void pruneLineage();
 public:
   WorldLayers world;
