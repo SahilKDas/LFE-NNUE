@@ -38,7 +38,7 @@ void NativeSimulation::refreshCapabilities(Organism& organism) {
   if(organism.isMover&&!organism.brain)organism.brain=std::make_shared<Nnue>(random_);else if(!organism.isMover)organism.brain.reset();
 }
 void NativeSimulation::reset() {
-  reproductionEnabled_=mortalityEnabled_=true;populationTarget_=0;births_=0;selectedId_=-1;deadCount_=0;std::fill(cells.begin(),cells.end(),uint8_t(CellType::Empty));std::fill(owners.begin(),owners.end(),-1);organisms_.clear();slotById_.clear();activeSlots_.clear();ticks_=0;++resets_;markAllDirty();
+  reproductionEnabled_=mortalityEnabled_=true;populationTarget_=std::min(10'000,width_*height_);births_=0;selectedId_=-1;deadCount_=0;std::fill(cells.begin(),cells.end(),uint8_t(CellType::Empty));std::fill(owners.begin(),owners.end(),-1);organisms_.clear();slotById_.clear();activeSlots_.clear();ticks_=0;++resets_;markAllDirty();
   Organism organism;organism.id=nextId_++;organism.x=width_/2;organism.y=height_/2;
   organism.cells={{CellType::Mouth,0,0,0},{CellType::Producer,-1,-1,0},{CellType::Producer,1,1,0}};
   refreshCapabilities(organism);largest_=std::max(largest_,int(organism.cells.size()));organism.activeIndex=activeSlots_.size();activeSlots_.push_back(organisms_.size());organisms_.push_back(std::move(organism));slotById_[organisms_.back().id]=organisms_.size()-1;placeBody(organisms_.back());rebuildRegionIndex();
