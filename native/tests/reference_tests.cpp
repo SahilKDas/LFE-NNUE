@@ -10,6 +10,16 @@
 #include <iostream>
 #include <sstream>
 
+namespace life {
+struct NativeSimulationTestAccess {
+  static void atmosphere(NativeSimulation& simulation,double oxygen,double carbonDioxide){simulation.atmosphericOxygen_=oxygen;simulation.carbonDioxide_=carbonDioxide;}
+  static void tick(NativeSimulation& simulation,int tick){simulation.ticks_=tick;}
+  static void respiratoryMortality(NativeSimulation& simulation){simulation.processRespiratoryMortality();}
+  static void update(NativeSimulation& simulation,Organism& organism){simulation.updateOrganism(organism);}
+  static std::vector<Organism>& organisms(NativeSimulation& simulation){return simulation.organisms_;}
+};
+}
+
 namespace {
 int failures = 0;
 void check(bool condition, const char* message) { if (!condition) { std::cerr << "FAIL: " << message << '\n'; ++failures; } }
@@ -53,6 +63,12 @@ int main() {
   check(editable.paintTerrain(16,10,life::TerrainType::Mountain),"impassable terrain paint failed");check(editable.organismAt(16,10)==nullptr,"impassable terrain did not kill occupying organism");check(editable.paintResource(16,10,life::ResourceType::Carrion,321)&&editable.world.resourceAmount[10*32+16]==321,"resource painting on barrier diverged from reference");
   const auto priorTerrain=editable.world.terrain;editable.regenerate(42);check(editable.metrics().ticks==0&&editable.metrics().organisms==1,"regeneration did not reset simulation");check(editable.world.terrain!=priorTerrain,"regeneration seed did not replace terrain");check(editable.organismAt(16,10)!=nullptr,"organism inspection lookup failed");
   life::NativeSimulation benchmarkPopulation(256,160,.2,500,73,19);check(benchmarkPopulation.seedBenchmarkMovers(1'000)==1'000,"benchmark population did not reach 1,000 rich organisms");check(benchmarkPopulation.metrics().organisms==1'000&&benchmarkPopulation.metrics().predators>0&&benchmarkPopulation.metrics().plantEaters>0&&benchmarkPopulation.metrics().scavengers>0&&benchmarkPopulation.metrics().mineralEaters>0,"rich benchmark ecology mix mismatch");
+  {
+    life::NativeSimulation health(64,40,.0,50'000,73,19);check(health.seedBenchmarkMovers(12)==12,"health test population setup failed");auto& organisms=life::NativeSimulationTestAccess::organisms(health);for(auto& organism:organisms){organism.respiratoryRisk=.10;organism.hypoxiaStress=.80;}organisms[5].respiratoryRisk=.90;const int highestRiskId=organisms[5].id;life::NativeSimulationTestAccess::tick(health,10);life::NativeSimulationTestAccess::respiratoryMortality(health);check(!organisms[5].living&&organisms[5].deathCause=="Respiratory failure","highest respiratory risk did not die first");check(health.respiratoryDeathCount()==1,"first respiratory death was not counted");life::NativeSimulationTestAccess::tick(health,19);life::NativeSimulationTestAccess::respiratoryMortality(health);check(health.respiratoryDeathCount()==1,"respiratory deaths were not limited to one per ten ticks");life::NativeSimulationTestAccess::tick(health,20);life::NativeSimulationTestAccess::respiratoryMortality(health);check(health.respiratoryDeathCount()==2,"eligible respiratory death did not resume after ten ticks");std::vector<int> respiratoryDeathTicks;for(const auto& organism:organisms)if(organism.deathCause=="Respiratory failure")respiratoryDeathTicks.push_back(organism.deathTick);std::sort(respiratoryDeathTicks.begin(),respiratoryDeathTicks.end());for(size_t index=1;index<respiratoryDeathTicks.size();++index)check(respiratoryDeathTicks[index]-respiratoryDeathTicks[index-1]>=10,"respiratory death spacing fell below ten ticks");check(highestRiskId>0,"invalid respiratory victim id");
+  }
+  {
+    life::NativeSimulation health(32,20,.0,50'000,41,91);auto& founder=life::NativeSimulationTestAccess::organisms(health).front();life::NativeSimulationTestAccess::atmosphere(health,.06,.15);life::NativeSimulationTestAccess::update(health,founder);const double stressed=founder.hypoxiaStress;check(stressed>0&&founder.living,"respiratory stress did not accumulate gradually");life::NativeSimulationTestAccess::atmosphere(health,.21,.0004);life::NativeSimulationTestAccess::update(health,founder);check(founder.hypoxiaStress<stressed&&health.respiratoryDeathCount()==0,"healthy atmosphere did not recover stress without respiratory death");
+  }
   life::NativeSimulation simulation(96,60,.2,500,524114809,334462);
   check(stateHash(simulation)=="343b32ea4840d95cab47b17cdeedd776b582c30c053fcd4cab74e0fe4f75ca88","native tick-0 whole-state hash mismatch");
   check(simulation.metrics().organisms==1&&simulation.metrics().averageEnergy==12.0,"native reset state mismatch");
@@ -70,7 +86,9 @@ int main() {
   if(simulation.metrics().organisms!=39){std::cerr<<"FAIL: native tick-100 population mismatch (actual "<<simulation.metrics().organisms<<", expected 39)\n";++failures;}
   near(simulation.metrics().averageEnergy,13.923538461538461,1e-12,"native tick-100 energy mismatch");
   const auto evolvedFounder=simulation.inspect(1);check(evolvedFounder.has_value()&&evolvedFounder->totalDescendants>0,"native lineage descendants were not recorded");
+  check(evolvedFounder.has_value()&&evolvedFounder->oxygenTolerance>=.08&&evolvedFounder->oxygenTolerance<=.16&&evolvedFounder->stressRecovery>=.002&&evolvedFounder->frailty>=.35,"observatory physiology fields are invalid");
   const auto descendant=std::find_if(simulation.organisms().begin(),simulation.organisms().end(),[](const life::Organism& organism){return organism.parentId>=0;});if(descendant!=simulation.organisms().end()){const auto childInspection=simulation.inspect(descendant->id);check(childInspection.has_value()&&!childInspection->ancestors.empty()&&!childInspection->mutations.empty(),"native descendant ancestry or mutations missing");}
+  const bool hasHealthMutation=std::any_of(simulation.organisms().begin(),simulation.organisms().end(),[](const life::Organism& organism){return std::any_of(organism.mutations.begin(),organism.mutations.end(),[](const std::string& mutation){return mutation.starts_with("Oxygen tolerance")||mutation.starts_with("Respiratory recovery")||mutation.starts_with("Frailty");});});check(hasHealthMutation,"heritable physiology mutations were not recorded in lineage");
   simulation.step(900);
   if(simulation.metrics().organisms!=768){std::cerr<<"FAIL: native tick-1000 population mismatch (actual "<<simulation.metrics().organisms<<", expected 768)\n";++failures;}
   simulation.step(1'000);const auto toroidalMetrics=simulation.metrics();check(toroidalMetrics.organisms>0&&std::isfinite(toroidalMetrics.averageEnergy),"toroidal long-run ecology became invalid");check(toroidalMetrics.awakeRegions>0&&toroidalMetrics.awakeRegions+toroidalMetrics.sleepingRegions==6,"region sleep accounting mismatch");

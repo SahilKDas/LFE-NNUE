@@ -70,6 +70,7 @@ Choose the Inspect tool and click any living organism to open its observatory re
 - its persistent creature ID, generation, life state, age, body size, food, and damage
 - its complete ancestor chain and all recorded descendants
 - body, movement, birth-distance, neural-weight, and neural-mutation-rate changes
+- respiratory stress, death cause, and inherited oxygen-tolerance, recovery, and frailty genes
 - the live sparse 5x5 sensory input seen by mover organisms
 - all five NNUE output probabilities and the selected action
 
@@ -80,6 +81,8 @@ Ancestors and descendants are clickable, and lineage records remain inspectable 
 Seeded worlds now have separate terrain, organism, resource, and quantity layers. Fertile land, plains, deserts, water, and mountains interact with seasons. Plant, scavenger, and mineral mouths occupy distinct niches; fixed-point energy drives metabolism and reproduction, minerals gate combat tissue, deaths leave carrion, and killer/armor durability wears into inert tissue.
 
 Perception radius and channel masks are heritable. Larger sensory workloads cost energy and reduce decision cadence under a hard inference budget, while movement remains exclusively NNUE-directed. The UI includes ecology editors, overlays, measured TPS/FPS, population summaries, and expanded inspection data.
+
+Atmospheric pressure suppresses reproduction before it becomes lethal. Respiratory stress accumulates separately for each organism from its genes, age, energy, temperature, and body size; the deterministic mortality queue can remove at most one critically stressed organism every ten simulation ticks.
 
 The TypeScript worker uses shared copy-on-write genomes, batched climate rows, renderer acknowledgements, and movement fast paths. `npm run benchmark` runs its strict 10k-at-60-TPS gate. If that gate fails, the optional Nim backend compiles directly to JavaScript—without Wasm or Emscripten:
 

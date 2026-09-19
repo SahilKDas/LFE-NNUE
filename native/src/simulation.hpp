@@ -19,6 +19,8 @@ struct Organism {
   bool living{true}, isProducer{}, isMover{}, isConsumer{}, isAttacker{};
   double thermalStress{};
   double hypoxiaStress{};
+  double oxygenTolerance{.12},stressRecovery{.01},frailty{1.0},respiratoryRisk{};
+  std::string deathCause;
   int perceptionRadius{DefaultSensorRadius}; uint8_t senseChannels{DefaultSenseChannels}; int neuralCost{168};
   int totalDescendants{};
   std::vector<std::string> mutations;
@@ -32,9 +34,9 @@ struct Organism {
 struct LineageSummary { int id{}, generation{}; bool alive{}; };
 struct OrganismInspection {
   int id{},parentId{-1},generation{},birthTick{},deathTick{-1},age{},cellCount{},energy{},minerals{},damage{};
-  double mutability{},neuralMutability{},thermalStress{},temperature{},fertility{},metabolicCost{};
+  double mutability{},neuralMutability{},thermalStress{},respiratoryStress{},oxygenTolerance{},stressRecovery{},frailty{},respiratoryRisk{},temperature{},fertility{},metabolicCost{};
   bool alive{},isMover{};int perceptionRadius{},senseChannels{},neuralCost{},totalDescendants{},attackDurability{},armorDurability{};
-  std::string action,diet,terrain,resource;
+  std::string action,diet,terrain,resource,deathCause;
   std::vector<std::string> mutations;
   std::vector<LineageSummary> ancestors,descendants;
   std::vector<uint16_t> senses;
@@ -45,16 +47,22 @@ struct NativeMetrics {
   int organisms{},record{},generation{},ticks{},largest{};
   double averageEnergy{},averageMutation{},averageStress{},temperature{},fertility{};
   double oxygen{},carbonDioxide{};
+  double averageOxygenTolerance{},averageRespiratoryStress{};
   int plantEaters{},scavengers{},mineralEaters{},predators{},nnueEvaluations{};
+  int respiratoryDeaths{},criticalRespiratory{};
   size_t memoryEstimate{};int awakeRegions{},sleepingRegions{},dirtyTiles{};
 };
 
 class NativeSimulation {
+  friend struct NativeSimulationTestAccess;
   int width_, height_; uint32_t worldSeed_; Mulberry32 random_; int nextId_{1}, ticks_{}, resets_{}, record_{}, largest_{}, selectedId_{-1}, deadCount_{};
   double foodChance_; int lifespan_, lineageLimit_, nnueEvaluations_{}; std::vector<Organism> organisms_;
   double atmosphericOxygen_{.21},carbonDioxide_{.0004};
   bool reproductionEnabled_{true}, mortalityEnabled_{true}; int populationTarget_{};
   int births_{};
+  int respiratoryDeaths_{},lastRespiratoryDeathTick_{-10};
+  struct RespiratoryCandidate { double risk{}; int id{}; };
+  std::vector<RespiratoryCandidate> respiratoryCandidates_;
   std::unordered_map<int,size_t> slotById_;
   std::vector<size_t> activeSlots_;
   static constexpr int RegionSize=32,DirtyTileSize=16;
@@ -78,7 +86,8 @@ class NativeSimulation {
   void produce(Organism& organism, int x, int y);
   void reproduce(Organism& parent);
   void mutate(Organism& organism);
-  void die(Organism& organism);
+  void die(Organism& organism, const char* cause);
+  void processRespiratoryMortality();
   void attack(Organism& attacker, BodyCell& weapon, int x, int y);
   void harm(Organism& organism);
   void harmAt(Organism& organism, int index);
@@ -115,6 +124,7 @@ public:
   int lineageRecordCount() const { return int(organisms_.size()); }
   int deadLineageRecordCount() const { return deadCount_; }
   int birthCount() const { return births_; }
+  int respiratoryDeathCount() const { return respiratoryDeaths_; }
   const std::vector<Organism>& organisms() const { return organisms_; }
 };
 }

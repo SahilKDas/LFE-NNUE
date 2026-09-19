@@ -24,6 +24,6 @@ int main(int argc,char** argv){
   std::cout<<std::fixed<<std::setprecision(2)
     <<"organisms="<<metrics.organisms<<" elapsed_s="<<elapsed<<" ticks="<<ticks
     <<" measured_tps="<<(ticks/elapsed)<<" nnue_eval_s="<<(metrics.nnueEvaluations/elapsed)
-    <<" brain_families="<<brainFamilies.size()<<" plant_tiles="<<plantTiles<<" oxygen="<<metrics.oxygen<<" co2="<<metrics.carbonDioxide<<" births="<<births<<" deaths="<<deaths<<'\n';
+    <<" brain_families="<<brainFamilies.size()<<" plant_tiles="<<plantTiles<<" oxygen="<<metrics.oxygen<<" co2="<<metrics.carbonDioxide<<" respiratory_stress="<<metrics.averageRespiratoryStress<<" critical="<<metrics.criticalRespiratory<<" respiratory_deaths="<<metrics.respiratoryDeaths<<" births="<<births<<" deaths="<<deaths<<'\n';
   return metrics.organisms>=8'500&&metrics.organisms<=10'000&&brainFamilies.size()>=128&&plantTiles>1'000&&births>0&&deaths>0&&ticks/elapsed>=60.0?0:1;
 }
