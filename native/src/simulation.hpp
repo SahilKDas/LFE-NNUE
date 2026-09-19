@@ -10,6 +10,8 @@
 #include <unordered_map>
 
 namespace life {
+enum class DeathCause : uint8_t { None, Starvation, Combat, OldAge, ThermalStress, Terrain, RespiratoryFailure };
+const char* deathCauseName(DeathCause cause);
 struct BodyCell { CellType type; int x, y; int durability{}; };
 struct Organism {
   int id{}, parentId{-1}, generation{}, birthTick{}, deathTick{-1}, x{}, y{};
@@ -20,6 +22,7 @@ struct Organism {
   double thermalStress{};
   double hypoxiaStress{};
   double oxygenTolerance{.12},stressRecovery{.01},frailty{1.0},respiratoryRisk{};
+  DeathCause deathCauseCode{DeathCause::None};
   std::string deathCause;
   int perceptionRadius{DefaultSensorRadius}; uint8_t senseChannels{DefaultSenseChannels}; int neuralCost{168};
   int totalDescendants{};
@@ -86,7 +89,7 @@ class NativeSimulation {
   void produce(Organism& organism, int x, int y);
   void reproduce(Organism& parent);
   void mutate(Organism& organism);
-  void die(Organism& organism, const char* cause);
+  void die(Organism& organism, DeathCause cause);
   void processRespiratoryMortality();
   void attack(Organism& attacker, BodyCell& weapon, int x, int y);
   void harm(Organism& organism);
