@@ -137,6 +137,7 @@ public:
   void step(int count = 1);
   NativeMetrics metrics() const;
   AtlasSnapshot atlasSnapshot() const;
+  uint64_t atlasRevision() const{return atlasRevision_;}
   void selectSpecies(int id){selectedSpeciesId_=id;++atlasRevision_;}
   int selectedSpecies() const{return selectedSpeciesId_;}
   std::vector<uint16_t> takeDirtyTiles();
