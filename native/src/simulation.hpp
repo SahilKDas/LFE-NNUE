@@ -66,6 +66,14 @@ class NativeSimulation {
   double atmosphericOxygen_{.21},carbonDioxide_{.0004};
   bool reproductionEnabled_{true}, mortalityEnabled_{true}; int populationTarget_{};
   int births_{};
+  std::array<int,7> deathsByCause_{},sampledDeaths_{};
+  int sampledBirths_{},nextSpeciesId_{1},selectedSpeciesId_{-1},lastSeason_{-1},lastPopulationPeak_{},crashBaseline_{},crashMinimum_{};
+  bool crashActive_{},atmosphereEventActive_{};
+  uint64_t atlasRevision_{};
+  std::vector<SpeciesSummary> species_;
+  std::vector<EcologySample> timeline_;
+  std::vector<EvolutionEvent> evolutionEvents_;
+  std::vector<Organism*> classificationBuffer_;
   int respiratoryDeaths_{},lastRespiratoryDeathTick_{-10};
   struct RespiratoryCandidate { double risk{}; int id{}; };
   std::vector<RespiratoryCandidate> respiratoryCandidates_;
@@ -94,6 +102,10 @@ class NativeSimulation {
   void mutate(Organism& organism);
   void die(Organism& organism, DeathCause cause);
   void processRespiratoryMortality();
+  GenomeDescriptor describeGenome(const Organism& organism) const;
+  void classifySpecies();
+  void sampleEcology();
+  void addEvolutionEvent(EvolutionEventType type,int speciesId,float value,const std::string& label);
   void attack(Organism& attacker, BodyCell& weapon, int x, int y);
   void harm(Organism& organism);
   void harmAt(Organism& organism, int index);
@@ -124,6 +136,9 @@ public:
   std::optional<OrganismInspection> inspect(int id) const;
   void step(int count = 1);
   NativeMetrics metrics() const;
+  AtlasSnapshot atlasSnapshot() const;
+  void selectSpecies(int id){selectedSpeciesId_=id;++atlasRevision_;}
+  int selectedSpecies() const{return selectedSpeciesId_;}
   std::vector<uint16_t> takeDirtyTiles();
   std::vector<uint16_t> changedTiles(std::vector<uint32_t>& knownVersions) const;
   static constexpr int dirtyTileSize(){return DirtyTileSize;}
