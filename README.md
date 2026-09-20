@@ -84,6 +84,12 @@ Perception radius and channel masks are heritable. Larger sensory workloads cost
 
 Atmospheric pressure suppresses reproduction before it becomes lethal. Respiratory stress accumulates separately for each organism from its genes, age, energy, temperature, and body size; the deterministic mortality queue can remove at most one critically stressed organism every ten simulation ticks.
 
+## Evolution Atlas
+
+Press **A** or click **ATLAS** to open native long-run analytics without pausing the simulation. The Timeline tab preserves 24,000 sixty-tick samples with population, resource, atmosphere, physiology, and death-rate history plus deterministic season, peak, crash, recovery, shortage, speciation, extinction, and regeneration markers. The Species table selects representatives, the Tree follows species ancestry, and Ecology summarizes the current resource and population balance. Cycle the world overlay to **Species** to color living organisms by their analytical species; this never changes NNUE inputs or physics.
+
+Species are classified every 300 ticks from rotation-normalized bodies, diet, perception, physiology, behavior genes, and cached NNUE signatures. IDs persist across scans, extinctions remain inspectable, and retained history is bounded. Reset Life confirms before clearing the run history; New Seeded World keeps the history and adds a regeneration marker.
+
 The TypeScript worker uses shared copy-on-write genomes, batched climate rows, renderer acknowledgements, and movement fast paths. `npm run benchmark` runs its strict 10k-at-60-TPS gate. If that gate fails, the optional Nim backend compiles directly to JavaScript—without Wasm or Emscripten:
 
 ~~~sh
@@ -100,4 +106,13 @@ cmake -S native -B native/build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
 cmake --build native/build -j 4
 ~~~
 
-Run `native/build/life_engine.exe` to launch the application in its own native window. The executable embeds the unchanged production frontend with Microsoft WebView2, so consumer-visible words, fonts, CSS, controls, physics, NNUE seed, and behavior remain identical. Keep `WebView2Loader.dll` beside the executable when distributing it. `life_engine_native_core.exe` is the separate native-core migration harness and is not the consumer application until it reaches parity.
+Run `native/build/life_engine.exe` to launch the native Win32/Skia application. Keep `libSkiaSharp.dll` beside the executable when distributing it. The renderer, controls, simulation, NNUEs, Atlas, and observatory run in native code; no WebView is used. `life_engine_webview_legacy.exe` is retained only as an excluded legacy target.
+
+The two native benchmark gates deliberately answer different questions:
+
+~~~sh
+native/build/life_engine_native_benchmark.exe 60
+native/build/life_engine_ecology_benchmark.exe 12000
+~~~
+
+The first holds lifecycle population fixed and measures throughput. The second runs a fixed number of full-ecology ticks twice and checks deterministic state, births, deaths, resources, timeline bounds, and species history.

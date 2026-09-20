@@ -7,7 +7,7 @@ life_engine_native_benchmark.exe 60
 organisms=10000 elapsed_s=60.00 ticks=28216 measured_tps=470.26 nnue_eval_s=592029.96
 ```
 
-This historical result used a shared NNUE and disabled reproduction and mortality. It is retained only for comparison and is no longer an acceptance result.
+This historical result used a shared NNUE and disabled reproduction and mortality. It is retained only for comparison.
 
 Plant-inclusive diverse ecology sample, 2026-09-16:
 
@@ -15,7 +15,14 @@ Plant-inclusive diverse ecology sample, 2026-09-16:
 organisms=9997 elapsed_s=5.00 ticks=691 measured_tps=138.06 nnue_eval_s=161896.70 brain_families=732 plant_tiles=39339 births=2865 deaths=2857
 ```
 
-The current gate uses independently evolving brain families, mixed moving organisms, stationary producers, active plant generation, reproduction, mutation, combat, aging, starvation, and mortality. Population capacity prevents runaway growth but does not disable lifecycle physics.
+The benchmark is now split. `life_engine_native_benchmark` holds the 10,000-organism population fixed so throughput cannot fail because ecology changed. `life_engine_ecology_benchmark` runs the full lifecycle for a fixed tick count twice and validates deterministic Atlas samples, species, resources, births, deaths, and bounded retention.
+
+Evolution Atlas smoke sample, 2026-09-19:
+
+```text
+performance: organisms=10000 measured_tps=239.67 brain_families=256 species=48
+ecology: ticks=300 organisms=9998 births=10354 deaths=10356 living_species=148 deterministic=yes
+```
 
 Integrated native UI acceptance sample, 2026-09-13:
 

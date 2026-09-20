@@ -19,6 +19,8 @@ struct SpeciesSummary {
   uint8_t dominantTerrain{},dietMask{};
   bool extinct{};
   std::string extinctionCause;
+  std::array<uint8_t,25> recentDeathCauses{};
+  uint8_t recentDeathCount{},recentDeathCursor{};
   GenomeDescriptor representative;
 };
 
