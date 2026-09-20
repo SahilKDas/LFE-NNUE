@@ -38,7 +38,7 @@ void NativeSimulation::clearBody(const Organism& organism){for(const auto& cell:
 void NativeSimulation::refreshCapabilities(Organism& organism) {
   organism.isProducer=organism.isMover=organism.isConsumer=organism.isAttacker=false;
   for(const auto& cell:organism.cells){organism.isProducer|=cell.type==CellType::Producer;organism.isMover|=cell.type==CellType::Mover;organism.isConsumer|=cell.type==CellType::Mouth||cell.type==CellType::PlantMouth||cell.type==CellType::ScavengerMouth||cell.type==CellType::MineralMouth;organism.isAttacker|=cell.type==CellType::Killer&&cell.durability>0;}
-  if(organism.isMover&&!organism.brain)organism.brain=std::make_shared<Nnue>(random_);else if(!organism.isMover)organism.brain.reset();
+  if(organism.isMover&&!organism.brain){organism.brain=std::make_shared<Nnue>(random_);organism.brainGenomeId=nextBrainGenomeId_++;}else if(!organism.isMover){organism.brain.reset();organism.brainGenomeId=0;}
 }
 void NativeSimulation::reset() {
   reproductionEnabled_=mortalityEnabled_=true;populationTarget_=0;births_=respiratoryDeaths_=0;lastRespiratoryDeathTick_=-10;atmosphericOxygen_=.21;carbonDioxide_=.0004;selectedId_=-1;deadCount_=0;std::fill(cells.begin(),cells.end(),uint8_t(CellType::Empty));std::fill(owners.begin(),owners.end(),-1);organisms_.clear();slotById_.clear();activeSlots_.clear();respiratoryCandidates_.clear();ticks_=0;++resets_;markAllDirty();
@@ -58,12 +58,12 @@ int NativeSimulation::seedBenchmarkMovers(int count) {
   std::fill(cells.begin(),cells.end(),uint8_t(CellType::Empty));
   std::fill(owners.begin(),owners.end(),-1);
   organisms_.clear();slotById_.clear();activeSlots_.clear();respiratoryCandidates_.clear();ticks_=0;record_=largest_=nnueEvaluations_=deadCount_=0;selectedId_=-1;
-  constexpr int BrainFamilyCount=256;std::vector<std::shared_ptr<Nnue>> brainFamilies;brainFamilies.reserve(BrainFamilyCount);for(int family=0;family<BrainFamilyCount;++family){auto brain=std::make_shared<Nnue>(random_);if(family)brain->mutate(random_,.01,.08);brainFamilies.push_back(std::move(brain));}
+  constexpr int BrainFamilyCount=256;std::vector<std::shared_ptr<Nnue>> brainFamilies;brainFamilies.reserve(BrainFamilyCount);for(int family=0;family<BrainFamilyCount;++family){auto brain=std::make_shared<Nnue>(random_);if(family)brain->mutate(random_,.01,.08);brainFamilies.push_back(std::move(brain));}nextBrainGenomeId_=BrainFamilyCount+1;
   organisms_.reserve(std::max<size_t>(organisms_.capacity(),size_t(count)));
   constexpr std::array<uint8_t,4> channelPatterns{DefaultSenseChannels,255,uint8_t(Occupancy|Danger|Resources),uint8_t(Heading|Temperature|Fertility|Internal)};
   int candidate=0;
   for(int y=2;y<height_-2&&int(organisms_.size())<count;y+=3)for(int x=2;x<width_-2&&int(organisms_.size())<count;x+=3,++candidate){
-    const bool stationaryProducer=candidate%5==0;Organism organism;organism.id=nextId_++;organism.x=x;organism.y=y;organism.energy=18'000+(candidate%9)*2'000;organism.minerals=400+(candidate%7)*150;organism.brain=stationaryProducer?nullptr:brainFamilies[candidate%BrainFamilyCount];organism.mutability=3+candidate%8;organism.neuralMutability=2.0+(candidate%11);organism.oxygenTolerance=.105+(candidate%7)*.005;organism.stressRecovery=.006+(candidate%6)*.002;organism.frailty=.75+(candidate%9)*.0625;
+    const bool stationaryProducer=candidate%5==0;Organism organism;organism.id=nextId_++;organism.x=x;organism.y=y;organism.energy=18'000+(candidate%9)*2'000;organism.minerals=400+(candidate%7)*150;organism.brain=stationaryProducer?nullptr:brainFamilies[candidate%BrainFamilyCount];organism.brainGenomeId=stationaryProducer?0:uint64_t(candidate%BrainFamilyCount+1);organism.mutability=3+candidate%8;organism.neuralMutability=2.0+(candidate%11);organism.oxygenTolerance=.105+(candidate%7)*.005;organism.stressRecovery=.006+(candidate%6)*.002;organism.frailty=.75+(candidate%9)*.0625;
     organism.cells.push_back({stationaryProducer?CellType::Producer:CellType::Mover,0,0,0});
     const CellType diet=candidate%3==0?CellType::PlantMouth:candidate%3==1?CellType::ScavengerMouth:CellType::MineralMouth;organism.cells.push_back({diet,1,0,0});
     if(candidate%4==0)organism.cells.push_back({CellType::Killer,-1,0,KillerDurability});
@@ -190,7 +190,7 @@ void NativeSimulation::reproduce(Organism& parent) {
   Organism child=parent;child.id=nextId_++;child.parentId=parent.id;++child.generation;child.birthTick=ticks_;child.deathTick=-1;child.energy=int(std::floor(parent.energy*.35));child.minerals=int(std::floor(parent.minerals*.25));child.lifetime=child.damage=child.moveCount=0;child.direction=child.rotation=0;child.hypoxiaStress=child.respiratoryRisk=0;child.deathCauseCode=DeathCause::None;child.deathCause.clear();child.living=true;child.mutations.clear();child.lastFeatures.clear();child.lastAction=-1;
   child.rotation=int(std::floor(random_()*4.0));
   child.mutability=std::max(1,child.mutability+(random_()<=.5?1:-1));child.mutations.push_back("Body mutation rate changed to "+std::to_string(child.mutability)+"%");if(random_()*100.0<=parent.mutability)mutate(child);
-  if(child.isMover&&child.brain&&random_()*100.0<=child.neuralMutability){child.brain=std::make_shared<Nnue>(*child.brain);child.brain->mutate(random_);child.mutations.push_back("NNUE weights mutated");}
+  if(child.isMover&&child.brain&&random_()*100.0<=child.neuralMutability){child.brain=std::make_shared<Nnue>(*child.brain);child.brain->mutate(random_);child.brainGenomeId=nextBrainGenomeId_++;child.mutations.push_back("NNUE weights mutated");}
   if(random_()<.1){child.neuralMutability=std::clamp(child.neuralMutability+(random_()<.5?-.5:.5),.5,50.0);child.mutations.push_back("Neural mutation rate changed");}
   const auto geneRoll=[&](uint64_t salt){uint64_t value=uint64_t(child.id)^salt;value=(value^(value>>30))*0xbf58476d1ce4e5b9ULL;value=(value^(value>>27))*0x94d049bb133111ebULL;value^=value>>31;return value;};const auto geneDelta=[&](uint64_t salt){return double(geneRoll(salt)&0xffff)/65535.0-.5;};
   if(geneRoll(0x4f32544f4c455241ULL)%100<12){child.oxygenTolerance=std::clamp(child.oxygenTolerance+geneDelta(0x101)*.012,.08,.16);child.mutations.push_back("Oxygen tolerance changed to "+std::to_string(child.oxygenTolerance));}

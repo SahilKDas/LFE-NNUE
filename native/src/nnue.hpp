@@ -25,6 +25,7 @@ class Nnue {
   std::array<std::array<float, HiddenSize>, OutputSize> outputWeights{};
   std::array<float, OutputSize> outputBias{}, output{};
   std::vector<uint16_t> active;
+  mutable uint64_t signatureCache_{};
   static bool trainedFeature(int index) {
     return (index < 24 * FeatureCategories && index % FeatureCategories < 11) ||
       (index >= PositionCount * FeatureCategories && index < PositionCount * FeatureCategories + 8);
@@ -45,13 +46,14 @@ public:
     accumulator = hiddenBias;
   }
   Nnue(const Nnue& source) : inputWeights(source.inputWeights), hiddenBias(source.hiddenBias), accumulator(source.hiddenBias),
-    outputWeights(source.outputWeights), outputBias(source.outputBias) {}
+    outputWeights(source.outputWeights), outputBias(source.outputBias),signatureCache_(source.signatureCache_) {}
   void mutate(Mulberry32& random, double probability=.03, double magnitude=.2) {
     bool changed=false;const auto perturb=[&](float& value){if(random()<probability){value=float(value+weight(random,magnitude));changed=true;}};
     for(auto& row:inputWeights)for(float& value:row)perturb(value);for(float& value:hiddenBias)perturb(value);for(auto& row:outputWeights)for(float& value:row)perturb(value);for(float& value:outputBias)perturb(value);
     if(!changed){const int index=int(std::floor(random()*OutputSize));outputBias[index]=float(outputBias[index]+weight(random,magnitude));}
-    active.clear();accumulator=hiddenBias;
+    active.clear();accumulator=hiddenBias;signatureCache_=0;
   }
+  uint64_t signature() const {if(signatureCache_)return signatureCache_;uint64_t hash=1469598103934665603ULL;const auto add=[&](float value){hash^=std::bit_cast<uint32_t>(value);hash*=1099511628211ULL;};for(const auto& row:inputWeights)for(const float value:row)add(value);for(const float value:hiddenBias)add(value);for(const auto& row:outputWeights)for(const float value:row)add(value);for(const float value:outputBias)add(value);signatureCache_=hash?hash:1;return signatureCache_;}
   const std::array<float, OutputSize>& evaluate(std::span<const uint16_t> features) {
     size_t oldIndex = 0, newIndex = 0;
     while (oldIndex < active.size() || newIndex < features.size()) {

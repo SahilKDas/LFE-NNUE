@@ -1,6 +1,7 @@
 #pragma once
 #include "nnue.hpp"
 #include "reference.hpp"
+#include "atlas.hpp"
 #include <cstdint>
 #include <array>
 #include <optional>
@@ -31,6 +32,8 @@ struct Organism {
   std::array<float,OutputSize> lastOutputs{};
   int lastAction{-1};
   size_t activeIndex{};
+  uint64_t brainGenomeId{};
+  int speciesId{-1};
   std::shared_ptr<Nnue> brain;
 };
 
@@ -58,7 +61,7 @@ struct NativeMetrics {
 
 class NativeSimulation {
   friend struct NativeSimulationTestAccess;
-  int width_, height_; uint32_t worldSeed_; Mulberry32 random_; int nextId_{1}, ticks_{}, resets_{}, record_{}, largest_{}, selectedId_{-1}, deadCount_{};
+  int width_, height_; uint32_t worldSeed_; Mulberry32 random_; int nextId_{1}, ticks_{}, resets_{}, record_{}, largest_{}, selectedId_{-1}, deadCount_{};uint64_t nextBrainGenomeId_{1};
   double foodChance_; int lifespan_, lineageLimit_, nnueEvaluations_{}; std::vector<Organism> organisms_;
   double atmosphericOxygen_{.21},carbonDioxide_{.0004};
   bool reproductionEnabled_{true}, mortalityEnabled_{true}; int populationTarget_{};
