@@ -69,6 +69,8 @@ class NativeSimulation {
   std::array<int,7> deathsByCause_{},sampledDeaths_{};
   int sampledBirths_{},nextSpeciesId_{1},selectedSpeciesId_{-1},lastSeason_{-1},lastPopulationPeak_{},crashBaseline_{},crashMinimum_{};
   bool crashActive_{},atmosphereEventActive_{};
+  std::array<uint8_t,3> resourceShortageRuns_{};
+  std::array<bool,3> resourceShortageActive_{};
   uint64_t atlasRevision_{};
   std::vector<SpeciesSummary> species_;
   std::vector<EcologySample> timeline_;

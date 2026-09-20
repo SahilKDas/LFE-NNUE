@@ -26,7 +26,7 @@ struct EcologySample {
   int tick{},population{},births{},plantEaters{},scavengers{},mineralEaters{},predators{},species{},criticalRespiratory{};
   std::array<int,7> deaths{};
   uint32_t plant{},carrion{},mineral{};
-  float averageEnergy{},averageBodySize{},averagePerceptionCost{},averageRespiratoryStress{},averageOxygenTolerance{},oxygen{},carbonDioxide{},temperature{},fertility{};
+  float averageEnergy{},averageBodySize{},averagePerceptionCost{},averageRespiratoryStress{},averageOxygenTolerance{},averageStressRecovery{},averageFrailty{},oxygen{},carbonDioxide{},temperature{},fertility{};
   uint64_t nnueEvaluations{},memoryEstimate{};
 };
 

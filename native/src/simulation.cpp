@@ -41,7 +41,7 @@ void NativeSimulation::refreshCapabilities(Organism& organism) {
   if(organism.isMover&&!organism.brain){organism.brain=std::make_shared<Nnue>(random_);organism.brainGenomeId=nextBrainGenomeId_++;}else if(!organism.isMover){organism.brain.reset();organism.brainGenomeId=0;}
 }
 void NativeSimulation::reset() {
-  selectedSpeciesId_=-1;deathsByCause_.fill(0);sampledDeaths_.fill(0);sampledBirths_=0;nextSpeciesId_=1;lastSeason_=-1;lastPopulationPeak_=crashBaseline_=crashMinimum_=0;crashActive_=atmosphereEventActive_=false;atlasRevision_=0;species_.clear();timeline_.clear();evolutionEvents_.clear();classificationBuffer_.clear();
+  selectedSpeciesId_=-1;deathsByCause_.fill(0);sampledDeaths_.fill(0);sampledBirths_=0;nextSpeciesId_=1;lastSeason_=-1;lastPopulationPeak_=crashBaseline_=crashMinimum_=0;crashActive_=atmosphereEventActive_=false;resourceShortageRuns_.fill(0);resourceShortageActive_.fill(false);atlasRevision_=0;species_.clear();timeline_.clear();evolutionEvents_.clear();classificationBuffer_.clear();
   reproductionEnabled_=mortalityEnabled_=true;populationTarget_=0;births_=respiratoryDeaths_=0;lastRespiratoryDeathTick_=-10;atmosphericOxygen_=.21;carbonDioxide_=.0004;selectedId_=-1;deadCount_=0;std::fill(cells.begin(),cells.end(),uint8_t(CellType::Empty));std::fill(owners.begin(),owners.end(),-1);organisms_.clear();slotById_.clear();activeSlots_.clear();respiratoryCandidates_.clear();ticks_=0;++resets_;markAllDirty();
   Organism organism;organism.id=nextId_++;organism.x=width_/2;organism.y=height_/2;
   organism.cells={{CellType::Mouth,0,0,0},{CellType::Producer,-1,-1,0},{CellType::Producer,1,1,0}};
@@ -49,9 +49,11 @@ void NativeSimulation::reset() {
 }
 
 void NativeSimulation::regenerate(uint32_t seed) {
+  auto preservedTimeline=std::move(timeline_);auto preservedSpecies=std::move(species_);auto preservedEvents=std::move(evolutionEvents_);const int preservedNextSpecies=nextSpeciesId_;const uint64_t preservedRevision=atlasRevision_;
   worldSeed_ = seed;
   world = generateWorld(width_, height_, worldSeed_);
   reset();
+  timeline_=std::move(preservedTimeline);species_=std::move(preservedSpecies);evolutionEvents_=std::move(preservedEvents);nextSpeciesId_=preservedNextSpecies;atlasRevision_=preservedRevision;addEvolutionEvent(EvolutionEventType::Regeneration,-1,float(seed),"World regenerated from seed "+std::to_string(seed));
 }
 
 int NativeSimulation::seedBenchmarkMovers(int count) {
@@ -229,12 +231,45 @@ void NativeSimulation::classifySpecies(){
   classificationBuffer_.clear();classificationBuffer_.reserve(std::max(classificationBuffer_.capacity(),activeSlots_.size()));for(const size_t slot:activeSlots_)if(slot!=SIZE_MAX&&slot<organisms_.size()&&organisms_[slot].living)classificationBuffer_.push_back(&organisms_[slot]);std::sort(classificationBuffer_.begin(),classificationBuffer_.end(),[](const Organism* left,const Organism* right){return left->id<right->id;});for(auto& species:species_)species.population=0;
   for(Organism* organism:classificationBuffer_){const auto descriptor=describeGenome(*organism);double bestDistance=2;SpeciesSummary* best=nullptr;for(auto& species:species_){if(species.extinct)continue;const double distance=genomeDistance(descriptor,species.representative);if(distance<bestDistance||(distance==bestDistance&&best&&species.id<best->id)){bestDistance=distance;best=&species;}}if(!best||bestDistance>.22){int parentSpecies=-1;if(const auto* parent=organismById(organism->parentId))parentSpecies=parent->speciesId;species_.push_back({nextSpeciesId_++,parentSpecies,organism->id,0,0,ticks_,ticks_,0,0,uint8_t(world.terrain[wrappedIndex(organism->x,organism->y)]),descriptor.dietMask,false,"",descriptor});best=&species_.back();if(parentSpecies>=0)for(auto& candidate:species_)if(candidate.id==parentSpecies){++candidate.descendantSpecies;break;}addEvolutionEvent(EvolutionEventType::Speciation,best->id,0,"Species #"+std::to_string(best->id)+" emerged");}organism->speciesId=best->id;++best->population;best->peakPopulation=std::max(best->peakPopulation,best->population);best->lastTick=ticks_;best->missingScans=0;}
   for(auto& species:species_)if(!species.extinct&&species.population==0&&++species.missingScans>=2){species.extinct=true;const auto* representative=organismById(species.representativeId);species.extinctionCause=representative&&!representative->deathCause.empty()?representative->deathCause:"Population loss";addEvolutionEvent(EvolutionEventType::Extinction,species.id,0,"Species #"+std::to_string(species.id)+" became extinct");}
-  if(species_.size()>2'048){species_.erase(std::remove_if(species_.begin(),species_.end(),[&](const SpeciesSummary& species){return species.extinct&&species.id!=selectedSpeciesId_&&species_.size()>2'048;}),species_.end());}
+  if(species_.size()>2'048){
+    std::vector<int> protectedIds;for(int id=selectedSpeciesId_;id>=0;){protectedIds.push_back(id);const auto found=std::find_if(species_.begin(),species_.end(),[&](const SpeciesSummary& species){return species.id==id;});id=found==species_.end()?-1:found->parentId;}
+    while(species_.size()>2'048){auto oldest=species_.end();for(auto candidate=species_.begin();candidate!=species_.end();++candidate){if(!candidate->extinct||std::find(protectedIds.begin(),protectedIds.end(),candidate->id)!=protectedIds.end())continue;if(oldest==species_.end()||candidate->lastTick<oldest->lastTick||(candidate->lastTick==oldest->lastTick&&candidate->id<oldest->id))oldest=candidate;}if(oldest==species_.end())break;species_.erase(oldest);}
+  }
   ++atlasRevision_;
 }
 void NativeSimulation::sampleEcology(){
-  EcologySample sample;const auto current=metrics();sample.tick=ticks_;sample.population=current.organisms;sample.births=births_-sampledBirths_;sampledBirths_=births_;for(size_t index=0;index<sample.deaths.size();++index){sample.deaths[index]=deathsByCause_[index]-sampledDeaths_[index];sampledDeaths_[index]=deathsByCause_[index];}sample.plantEaters=current.plantEaters;sample.scavengers=current.scavengers;sample.mineralEaters=current.mineralEaters;sample.predators=current.predators;sample.criticalRespiratory=current.criticalRespiratory;sample.averageEnergy=float(current.averageEnergy);sample.averageRespiratoryStress=float(current.averageRespiratoryStress);sample.averageOxygenTolerance=float(current.averageOxygenTolerance);sample.oxygen=float(current.oxygen);sample.carbonDioxide=float(current.carbonDioxide);sample.temperature=float(current.temperature);sample.fertility=float(current.fertility);sample.nnueEvaluations=current.nnueEvaluations;sample.memoryEstimate=current.memoryEstimate;double bodies=0,perception=0;for(const size_t slot:activeSlots_)if(slot!=SIZE_MAX&&slot<organisms_.size()&&organisms_[slot].living){bodies+=organisms_[slot].cells.size();perception+=organisms_[slot].neuralCost;}if(sample.population){sample.averageBodySize=float(bodies/sample.population);sample.averagePerceptionCost=float(perception/sample.population);}for(size_t index=0;index<world.resources.size();++index){const uint32_t amount=world.resourceAmount[index];if(ResourceType(world.resources[index])==ResourceType::Plant)sample.plant+=amount;else if(ResourceType(world.resources[index])==ResourceType::Carrion)sample.carrion+=amount;else if(ResourceType(world.resources[index])==ResourceType::Mineral)sample.mineral+=amount;}sample.species=int(std::count_if(species_.begin(),species_.end(),[](const SpeciesSummary& species){return !species.extinct&&species.population>0;}));if(timeline_.size()>=24'000)timeline_.erase(timeline_.begin(),timeline_.begin()+1'000);timeline_.push_back(sample);
-  const int season=int(std::floor(cyclePhase(ticks_)*4))%4;if(season!=lastSeason_){lastSeason_=season;addEvolutionEvent(EvolutionEventType::Season,-1,float(season),"Season changed");}if(sample.population>lastPopulationPeak_){lastPopulationPeak_=sample.population;addEvolutionEvent(EvolutionEventType::PopulationPeak,-1,float(sample.population),"Population reached "+std::to_string(sample.population));}if(!crashBaseline_)crashBaseline_=sample.population;if(!crashActive_&&sample.population*5<=crashBaseline_*4){crashActive_=true;crashMinimum_=sample.population;addEvolutionEvent(EvolutionEventType::Crash,-1,float(sample.population),"Population crash");}else if(crashActive_){crashMinimum_=std::min(crashMinimum_,sample.population);if(sample.population*5>=crashMinimum_*6){crashActive_=false;crashBaseline_=sample.population;addEvolutionEvent(EvolutionEventType::Recovery,-1,float(sample.population),"Population recovery");}}const bool atmosphereStressed=sample.population>0&&sample.criticalRespiratory*20>sample.population;if(atmosphereStressed&&!atmosphereEventActive_)addEvolutionEvent(EvolutionEventType::AtmosphericStress,-1,float(sample.criticalRespiratory),"Atmospheric stress");atmosphereEventActive_=atmosphereStressed;++atlasRevision_;
+  EcologySample sample;
+  const auto current=metrics();
+  sample.tick=ticks_;sample.population=current.organisms;sample.births=births_-sampledBirths_;sampledBirths_=births_;
+  for(size_t index=0;index<sample.deaths.size();++index){sample.deaths[index]=deathsByCause_[index]-sampledDeaths_[index];sampledDeaths_[index]=deathsByCause_[index];}
+  sample.plantEaters=current.plantEaters;sample.scavengers=current.scavengers;sample.mineralEaters=current.mineralEaters;sample.predators=current.predators;sample.criticalRespiratory=current.criticalRespiratory;
+  sample.averageEnergy=float(current.averageEnergy);sample.averageRespiratoryStress=float(current.averageRespiratoryStress);sample.averageOxygenTolerance=float(current.averageOxygenTolerance);
+  sample.oxygen=float(current.oxygen);sample.carbonDioxide=float(current.carbonDioxide);sample.temperature=float(current.temperature);sample.fertility=float(current.fertility);sample.nnueEvaluations=current.nnueEvaluations;sample.memoryEstimate=current.memoryEstimate;
+  double bodies=0,perception=0,recovery=0,frailty=0;
+  for(const size_t slot:activeSlots_)if(slot!=SIZE_MAX&&slot<organisms_.size()&&organisms_[slot].living){const auto& organism=organisms_[slot];bodies+=organism.cells.size();perception+=organism.neuralCost;recovery+=organism.stressRecovery;frailty+=organism.frailty;}
+  if(sample.population){sample.averageBodySize=float(bodies/sample.population);sample.averagePerceptionCost=float(perception/sample.population);sample.averageStressRecovery=float(recovery/sample.population);sample.averageFrailty=float(frailty/sample.population);}
+  for(size_t index=0;index<world.resources.size();++index){const uint32_t amount=world.resourceAmount[index];if(ResourceType(world.resources[index])==ResourceType::Plant)sample.plant+=amount;else if(ResourceType(world.resources[index])==ResourceType::Carrion)sample.carrion+=amount;else if(ResourceType(world.resources[index])==ResourceType::Mineral)sample.mineral+=amount;}
+  sample.species=int(std::count_if(species_.begin(),species_.end(),[](const SpeciesSummary& species){return !species.extinct&&species.population>0;}));
+  if(timeline_.size()>=24'000)timeline_.erase(timeline_.begin(),timeline_.begin()+1'000);
+  timeline_.push_back(sample);
+  const int season=int(std::floor(cyclePhase(ticks_)*4))%4;
+  if(season!=lastSeason_){lastSeason_=season;addEvolutionEvent(EvolutionEventType::Season,-1,float(season),"Season changed");}
+  if(sample.population>lastPopulationPeak_){lastPopulationPeak_=sample.population;addEvolutionEvent(EvolutionEventType::PopulationPeak,-1,float(sample.population),"Population reached "+std::to_string(sample.population));}
+  const int population600=timeline_.size()>10?timeline_[timeline_.size()-11].population:sample.population;
+  crashBaseline_=population600;
+  if(!crashActive_&&sample.population*5<=population600*4){crashActive_=true;crashMinimum_=sample.population;addEvolutionEvent(EvolutionEventType::Crash,-1,float(sample.population),"Population crash");}
+  else if(crashActive_){crashMinimum_=std::min(crashMinimum_,sample.population);if(sample.population*5>=crashMinimum_*6){crashActive_=false;addEvolutionEvent(EvolutionEventType::Recovery,-1,float(sample.population),"Population recovery");}}
+  const std::array<uint32_t,3> resources{sample.plant,sample.carrion,sample.mineral};
+  for(size_t resource=0;resource<resources.size();++resource){
+    std::vector<uint32_t> history;const size_t begin=timeline_.size()>400?timeline_.size()-400:0;history.reserve(timeline_.size()-begin);
+    for(size_t index=begin;index+1<timeline_.size();++index)history.push_back(resource==0?timeline_[index].plant:resource==1?timeline_[index].carrion:timeline_[index].mineral);
+    if(history.empty())continue;const size_t middle=history.size()/2;std::nth_element(history.begin(),history.begin()+middle,history.end());
+    const bool low=resources[resource]*4<history[middle];resourceShortageRuns_[resource]=low?uint8_t(std::min(255,int(resourceShortageRuns_[resource])+1)):0;
+    if(resourceShortageRuns_[resource]>=5&&!resourceShortageActive_[resource]){resourceShortageActive_[resource]=true;constexpr const char* names[]{"Plant","Carrion","Mineral"};addEvolutionEvent(EvolutionEventType::ResourceShortage,-1,float(resources[resource]),std::string(names[resource])+" shortage");}else if(!low)resourceShortageActive_[resource]=false;
+  }
+  const bool atmosphereStressed=sample.population>0&&sample.criticalRespiratory*20>sample.population;
+  if(atmosphereStressed&&!atmosphereEventActive_)addEvolutionEvent(EvolutionEventType::AtmosphericStress,-1,float(sample.criticalRespiratory),"Atmospheric stress");
+  atmosphereEventActive_=atmosphereStressed;++atlasRevision_;
 }
 AtlasSnapshot NativeSimulation::atlasSnapshot() const{return{atlasRevision_,selectedSpeciesId_,timeline_,species_,evolutionEvents_};}
 void NativeSimulation::step(int count) {
