@@ -131,6 +131,7 @@ public:
   void reset();
   void regenerate(uint32_t seed);
   int seedBenchmarkMovers(int count);
+  void setBenchmarkLifecycle(bool enabled){reproductionEnabled_=mortalityEnabled_=enabled;}
   bool paintTerrain(int x, int y, TerrainType terrain);
   bool paintResource(int x, int y, ResourceType resource, uint16_t amount = 1000);
   const Organism* organismAt(int x, int y) const;
