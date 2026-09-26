@@ -54,6 +54,7 @@ public:
     active.clear();accumulator=hiddenBias;signatureCache_=0;
   }
   uint64_t signature() const {if(signatureCache_)return signatureCache_;uint64_t hash=1469598103934665603ULL;const auto add=[&](float value){hash^=std::bit_cast<uint32_t>(value);hash*=1099511628211ULL;};for(const auto& row:inputWeights)for(const float value:row)add(value);for(const float value:hiddenBias)add(value);for(const auto& row:outputWeights)for(const float value:row)add(value);for(const float value:outputBias)add(value);signatureCache_=hash?hash:1;return signatureCache_;}
+  bool featureRowZero(int feature) const {return feature>=0&&feature<int(inputWeights.size())&&std::all_of(inputWeights[feature].begin(),inputWeights[feature].end(),[](float value){return value==0;});}
   const std::array<float, OutputSize>& evaluate(std::span<const uint16_t> features) {
     size_t oldIndex = 0, newIndex = 0;
     while (oldIndex < active.size() || newIndex < features.size()) {

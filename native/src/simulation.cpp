@@ -106,6 +106,7 @@ bool NativeSimulation::paintResource(int x, int y, ResourceType resource, uint16
   markDirtyIndex(index);
   return true;
 }
+bool NativeSimulation::paintNutrients(int x,int y,uint16_t amount){const int index=safeIndex(x,y);if(index<0)return false;const auto terrain=TerrainType(world.terrain[index]);if(terrain==TerrainType::Water||terrain==TerrainType::Mountain)return false;const int capacity=terrain==TerrainType::Fertile?2400:terrain==TerrainType::Plains?1600:500;world.nutrients[index]=uint16_t(std::min<int>(amount,capacity));markDirtyIndex(index);return true;}
 
 const Organism* NativeSimulation::organismAt(int x, int y) const {
   const int index = safeIndex(x, y);

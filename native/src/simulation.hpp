@@ -141,6 +141,7 @@ public:
   void setBenchmarkLifecycle(bool enabled){reproductionEnabled_=mortalityEnabled_=enabled;}
   bool paintTerrain(int x, int y, TerrainType terrain);
   bool paintResource(int x, int y, ResourceType resource, uint16_t amount = 1000);
+  bool paintNutrients(int x,int y,uint16_t amount=1200);
   const Organism* organismAt(int x, int y) const;
   void select(int id) { selectedId_ = id; }
   std::optional<OrganismInspection> inspect(int id) const;

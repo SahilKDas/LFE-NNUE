@@ -80,7 +80,9 @@ Ancestors and descendants are clickable, and lineage records remain inspectable 
 
 Seeded worlds now have separate terrain, organism, resource, and quantity layers. Fertile land, plains, deserts, water, and mountains interact with seasons. Plant, scavenger, and mineral mouths occupy distinct niches; fixed-point energy drives metabolism and reproduction, minerals gate combat tissue, deaths leave carrion, and killer/armor durability wears into inert tissue.
 
-Perception radius and channel masks are heritable. Larger sensory workloads cost energy and reduce decision cadence under a hard inference budget, while movement remains exclusively NNUE-directed. The UI includes ecology editors, overlays, measured TPS/FPS, population summaries, and expanded inspection data.
+The native ecology also has a persistent fixed-point soil-nutrient layer. Decomposer mouths consume carrion for less immediate energy than scavengers, release nutrients into surrounding soil, and contribute a small amount of CO₂. Nutrients diffuse and decay at coarse deterministic intervals, obey terrain capacity, recover slowly, and are consumed by plant production. Nutrient and Decomposition overlays, a nutrient painting tool, Observatory lifetime totals, and Atlas nutrient-cycle events make the loop visible without introducing scripted steering.
+
+Perception radius and channel masks are heritable, including optional soil-nutrient and carrion-density modalities. Brain schema v4 appends these inputs after the complete v3 topology, initializes every new weight to zero, and preserves legacy NNUE outputs. Larger sensory workloads cost energy and reduce decision cadence under a hard inference budget, while movement remains exclusively NNUE-directed.
 
 Atmospheric pressure suppresses reproduction before it becomes lethal. Respiratory stress accumulates separately for each organism from its genes, age, energy, temperature, and body size; the deterministic mortality queue can remove at most one critically stressed organism every ten simulation ticks.
 
