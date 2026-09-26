@@ -1,6 +1,6 @@
-# Life Engine NNUE
+# LFE-NNUE v1.0.0
 
-A modern rewrite of Life Engine: a browser-based evolutionary ecosystem where organisms inherit body plans and sparse neural-network behavior.
+A production-ready native Windows evolutionary ecosystem where organisms inherit body plans, physiology, perception, and sparse neural-network behavior. The TypeScript implementation remains as a compatibility and training reference; the supported v1.0 application is the native C++/Skia executable.
 
 ## What changed
 
@@ -108,7 +108,15 @@ cmake -S native -B native/build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
 cmake --build native/build -j 4
 ~~~
 
-Run `native/build/life_engine.exe` to launch the native Win32/Skia application. Keep `libSkiaSharp.dll` beside the executable when distributing it. The renderer, controls, simulation, NNUEs, Atlas, and observatory run in native code; no WebView is used. `life_engine_webview_legacy.exe` is retained only as an excluded legacy target.
+Run `native/build/life_engine.exe` to launch the native Win32/Skia application. The renderer, controls, simulation, NNUEs, Atlas, and observatory run in native code; no WebView is used. The renderer DLL is embedded as a verified fallback, so the packaged `LFE-NNUE.exe` is standalone. `life_engine_webview_legacy.exe` is retained only as an excluded legacy target.
+
+Create the tested v1.0.0 Windows release, checksum, and standalone ZIP with:
+
+~~~powershell
+powershell -ExecutionPolicy Bypass -File scripts/package-native-release.ps1
+~~~
+
+The packager rebuilds the native target, runs deterministic tests, stages the executable without a sidecar DLL, runs its headless embedded-renderer self-test, and only then writes `dist/LFE-NNUE-v1.0.0-win64.zip`. Release notes include system requirements, controls, diagnostic paths, and known limits.
 
 The two native benchmark gates deliberately answer different questions:
 
