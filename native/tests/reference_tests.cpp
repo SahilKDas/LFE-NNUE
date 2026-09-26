@@ -18,20 +18,25 @@ struct NativeSimulationTestAccess {
   static void update(NativeSimulation& simulation,Organism& organism){simulation.updateOrganism(organism);}
   static GenomeDescriptor descriptor(const NativeSimulation& simulation,const Organism& organism){return simulation.describeGenome(organism);}
   static std::vector<Organism>& organisms(NativeSimulation& simulation){return simulation.organisms_;}
+  static void eat(NativeSimulation& simulation,Organism& organism,CellType mouth,int x,int y){simulation.eat(organism,mouth,x,y);}
+  static void nutrients(NativeSimulation& simulation){simulation.updateNutrients();}
 };
 }
 
 namespace {
 int failures = 0;
+std::string stateHash(const life::NativeSimulation& simulation);
 void check(bool condition, const char* message) { if (!condition) { std::cerr << "FAIL: " << message << '\n'; ++failures; } }
+void checkHash(const life::NativeSimulation& simulation,const char* expected,const char* message){const auto actual=stateHash(simulation);if(actual!=expected){std::cerr<<"FAIL: "<<message<<" (actual "<<actual<<")\n";++failures;}}
 void near(double actual, double expected, double tolerance, const char* message) { if(std::abs(actual-expected)>tolerance){std::cerr<<"FAIL: "<<message<<" (actual "<<actual<<", expected "<<expected<<")\n";++failures;} }
-std::string stateHash(const life::NativeSimulation& simulation){BCRYPT_ALG_HANDLE algorithm{};BCRYPT_HASH_HANDLE hash{};DWORD objectBytes=0,resultBytes=0;BCryptOpenAlgorithmProvider(&algorithm,BCRYPT_SHA256_ALGORITHM,nullptr,0);BCryptGetProperty(algorithm,BCRYPT_OBJECT_LENGTH,reinterpret_cast<PUCHAR>(&objectBytes),sizeof(objectBytes),&resultBytes,0);std::vector<UCHAR> object(objectBytes),result(32);BCryptCreateHash(algorithm,&hash,object.data(),DWORD(object.size()),nullptr,0,0);const auto append=[&](const void* data,size_t bytes){BCryptHashData(hash,const_cast<PUCHAR>(static_cast<const UCHAR*>(data)),DWORD(bytes),0);};append(simulation.cells.data(),simulation.cells.size());append(simulation.owners.data(),simulation.owners.size()*sizeof(int32_t));append(simulation.world.terrain.data(),simulation.world.terrain.size());append(simulation.world.resources.data(),simulation.world.resources.size());append(simulation.world.resourceAmount.data(),simulation.world.resourceAmount.size()*sizeof(uint16_t));BCryptFinishHash(hash,result.data(),DWORD(result.size()),0);BCryptDestroyHash(hash);BCryptCloseAlgorithmProvider(algorithm,0);std::ostringstream encoded;for(const auto byte:result)encoded<<std::hex<<std::setw(2)<<std::setfill('0')<<int(byte);return encoded.str();}
+std::string stateHash(const life::NativeSimulation& simulation){BCRYPT_ALG_HANDLE algorithm{};BCRYPT_HASH_HANDLE hash{};DWORD objectBytes=0,resultBytes=0;BCryptOpenAlgorithmProvider(&algorithm,BCRYPT_SHA256_ALGORITHM,nullptr,0);BCryptGetProperty(algorithm,BCRYPT_OBJECT_LENGTH,reinterpret_cast<PUCHAR>(&objectBytes),sizeof(objectBytes),&resultBytes,0);std::vector<UCHAR> object(objectBytes),result(32);BCryptCreateHash(algorithm,&hash,object.data(),DWORD(object.size()),nullptr,0,0);const auto append=[&](const void* data,size_t bytes){BCryptHashData(hash,const_cast<PUCHAR>(static_cast<const UCHAR*>(data)),DWORD(bytes),0);};append(simulation.cells.data(),simulation.cells.size());append(simulation.owners.data(),simulation.owners.size()*sizeof(int32_t));append(simulation.world.terrain.data(),simulation.world.terrain.size());append(simulation.world.resources.data(),simulation.world.resources.size());append(simulation.world.resourceAmount.data(),simulation.world.resourceAmount.size()*sizeof(uint16_t));append(simulation.world.nutrients.data(),simulation.world.nutrients.size()*sizeof(uint16_t));BCryptFinishHash(hash,result.data(),DWORD(result.size()),0);BCryptDestroyHash(hash);BCryptCloseAlgorithmProvider(algorithm,0);std::ostringstream encoded;for(const auto byte:result)encoded<<std::hex<<std::setw(2)<<std::setfill('0')<<int(byte);return encoded.str();}
 }
 
 int main() {
   static_assert(int(life::CellType::Inert) == 11);
   static_assert(int(life::Action::Wait) == 4);
-  static_assert(life::InputSize == life::PositionCount * life::FeatureCategories + 25);
+  static_assert(life::LegacyInputSize == life::PositionCount * life::FeatureCategories + 25);
+  static_assert(life::InputSize == life::LegacyInputSize + life::PositionCount * 2);
   life::Mulberry32 random(334462);
   const double expected[] = {0.023944327142089605, 0.84153357916511595, 0.60139716230332851, 0.56424767896533012, 0.24601307534612715, 0.67428731429390609, 0.79913979861885309, 0.17321427632123232};
   for (double value : expected) near(random(), value, 0.0, "Mulberry32 sequence differs from TypeScript");
@@ -44,6 +49,7 @@ int main() {
   check(first.terrain == second.terrain, "terrain generation is not deterministic");
   check(first.resources == second.resources, "resource generation is not deterministic");
   check(first.resourceAmount == second.resourceAmount, "resource amounts are not deterministic");
+  check(first.nutrients==second.nutrients,"soil nutrient generation is not deterministic");for(size_t index=0;index<first.terrain.size();++index)if(life::TerrainType(first.terrain[index])==life::TerrainType::Water||life::TerrainType(first.terrain[index])==life::TerrainType::Mountain)check(first.nutrients[index]==0,"impassable terrain retained soil nutrients");
   check(first.terrain != life::generateWorld(96, 60, 524114810).terrain, "world seed does not affect terrain");
   const auto defaultPerception = life::clampPerception(2, life::DefaultSenseChannels);
   check(defaultPerception.radius == 2 && defaultPerception.channels == 239 && defaultPerception.cost == 168, "default perception mismatch");
@@ -61,9 +67,10 @@ int main() {
   for(int index=0;index<int(editable.owners.size());++index)if(editable.owners[index]<0&&life::TerrainType(editable.world.terrain[index])!=life::TerrainType::Water&&life::TerrainType(editable.world.terrain[index])!=life::TerrainType::Mountain){editableIndex=index;break;}
   check(editableIndex>=0,"editable terrain cell unavailable");
   if(editableIndex>=0){const int x=editableIndex%32,y=editableIndex/32;check(editable.paintTerrain(x,y,life::TerrainType::Desert),"terrain painting failed");check(life::TerrainType(editable.world.terrain[editableIndex])==life::TerrainType::Desert,"terrain paint did not persist");check(editable.paintResource(x,y,life::ResourceType::Mineral,777),"resource painting failed");check(life::ResourceType(editable.world.resources[editableIndex])==life::ResourceType::Mineral&&editable.world.resourceAmount[editableIndex]==777,"resource paint did not persist");}
+  {auto& organism=life::NativeSimulationTestAccess::organisms(editable).front();const int x=organism.x+1,y=organism.y;editable.paintTerrain(x,y,life::TerrainType::Plains);editable.paintResource(x,y,life::ResourceType::Carrion,100);const int beforeEnergy=organism.energy;const auto nutrientsBefore=editable.world.nutrients;life::NativeSimulationTestAccess::eat(editable,organism,life::CellType::DecomposerMouth,organism.x,organism.y);check(organism.energy-beforeEnergy==life::DecomposerEnergy,"decomposer energy conversion mismatch");check(organism.carrionConsumed==100&&organism.nutrientsReleased==75,"decomposer counters mismatch");check(editable.world.nutrients!=nutrientsBefore,"decomposer did not release soil nutrients");}
   check(editable.paintTerrain(16,10,life::TerrainType::Mountain),"impassable terrain paint failed");check(editable.organismAt(16,10)==nullptr,"impassable terrain did not kill occupying organism");check(editable.paintResource(16,10,life::ResourceType::Carrion,321)&&editable.world.resourceAmount[10*32+16]==321,"resource painting on barrier diverged from reference");
   const auto priorTerrain=editable.world.terrain;editable.regenerate(42);check(editable.metrics().ticks==0&&editable.metrics().organisms==1,"regeneration did not reset simulation");check(editable.world.terrain!=priorTerrain,"regeneration seed did not replace terrain");check(editable.organismAt(16,10)!=nullptr,"organism inspection lookup failed");
-  life::NativeSimulation benchmarkPopulation(256,160,.2,500,73,19);check(benchmarkPopulation.seedBenchmarkMovers(1'000)==1'000,"benchmark population did not reach 1,000 rich organisms");check(benchmarkPopulation.metrics().organisms==1'000&&benchmarkPopulation.metrics().predators>0&&benchmarkPopulation.metrics().plantEaters>0&&benchmarkPopulation.metrics().scavengers>0&&benchmarkPopulation.metrics().mineralEaters>0,"rich benchmark ecology mix mismatch");
+  life::NativeSimulation benchmarkPopulation(256,160,.2,500,73,19);check(benchmarkPopulation.seedBenchmarkMovers(1'000)==1'000,"benchmark population did not reach 1,000 rich organisms");check(benchmarkPopulation.metrics().organisms==1'000&&benchmarkPopulation.metrics().predators>0&&benchmarkPopulation.metrics().plantEaters>0&&benchmarkPopulation.metrics().scavengers>0&&benchmarkPopulation.metrics().mineralEaters>0&&benchmarkPopulation.metrics().decomposers>0,"rich benchmark ecology mix mismatch");
   {const auto original=life::NativeSimulationTestAccess::organisms(benchmarkPopulation).front();auto rotated=original;for(auto& cell:rotated.cells){const int priorX=cell.x;cell.x=-cell.y;cell.y=priorX;}const auto first=life::NativeSimulationTestAccess::descriptor(benchmarkPopulation,original),second=life::NativeSimulationTestAccess::descriptor(benchmarkPopulation,rotated);check(first.bodyHash==second.bodyHash,"genome body canonicalization changed under rotation");check(life::genomeDistance(first,first)==0,"identical genome distance was nonzero");}
   benchmarkPopulation.step(300);const auto benchmarkAtlas=benchmarkPopulation.atlasSnapshot();check(!benchmarkAtlas.species.empty()&&benchmarkAtlas.timeline.size()==5,"species scan or sixty-tick timeline sampling failed");check(std::all_of(benchmarkPopulation.organisms().begin(),benchmarkPopulation.organisms().end(),[](const life::Organism& organism){return !organism.living||organism.speciesId>0;}),"living organism was not assigned to a species");check(benchmarkAtlas.timeline.back().averageStressRecovery>0&&benchmarkAtlas.timeline.back().averageFrailty>0,"timeline omitted inherited health averages");
   const auto samplesBeforeRegeneration=benchmarkAtlas.timeline.size();benchmarkPopulation.regenerate(991);const auto regeneratedAtlas=benchmarkPopulation.atlasSnapshot();check(regeneratedAtlas.timeline.size()==samplesBeforeRegeneration,"world regeneration cleared Atlas history");check(!regeneratedAtlas.events.empty()&&regeneratedAtlas.events.back().type==life::EvolutionEventType::Regeneration,"world regeneration marker missing");benchmarkPopulation.reset();check(benchmarkPopulation.atlasSnapshot().timeline.empty()&&benchmarkPopulation.atlasSnapshot().events.empty(),"life reset did not clear Atlas history");
@@ -74,27 +81,27 @@ int main() {
     life::NativeSimulation health(32,20,.0,50'000,41,91);auto& founder=life::NativeSimulationTestAccess::organisms(health).front();life::NativeSimulationTestAccess::atmosphere(health,.06,.15);life::NativeSimulationTestAccess::update(health,founder);const double stressed=founder.hypoxiaStress;check(stressed>0&&founder.living,"respiratory stress did not accumulate gradually");life::NativeSimulationTestAccess::atmosphere(health,.21,.0004);life::NativeSimulationTestAccess::update(health,founder);check(founder.hypoxiaStress<stressed&&health.respiratoryDeathCount()==0,"healthy atmosphere did not recover stress without respiratory death");
   }
   life::NativeSimulation simulation(96,60,.2,500,524114809,334462);
-  check(stateHash(simulation)=="343b32ea4840d95cab47b17cdeedd776b582c30c053fcd4cab74e0fe4f75ca88","native tick-0 whole-state hash mismatch");
+  checkHash(simulation,"5226721e79e934bb6632da6883be2226c1d45dba15be0ad9e8aef600011b2430","native tick-0 whole-state hash mismatch");
   check(simulation.metrics().organisms==1&&simulation.metrics().averageEnergy==12.0,"native reset state mismatch");
   const auto founder=simulation.inspect(1);check(founder.has_value()&&founder->generation==0&&founder->ancestors.empty()&&founder->descendants.empty()&&founder->diet=="Plant","native founder inspection mismatch");
   simulation.step();
-  check(stateHash(simulation)=="8dac5314a81b1de7799ab2091dd9754a99c1c7f3d6b35f05ae1794db1f5b1de2","native tick-1 whole-state hash mismatch");
+  checkHash(simulation,"82e1377ea5b1a6dce5a8bd233261d72975be594bb44d682886ec91c67858c483","native tick-1 whole-state hash mismatch");
   check(simulation.metrics().ticks==1,"native simulation clock mismatch");
   near(simulation.metrics().averageEnergy,11.989,1e-12,"native first-tick energy mismatch");
   simulation.step(9);
-  check(stateHash(simulation)=="53372fe6b4c9faf497fba2f1492145c889e8f4eb671787a5a60c69947b6047eb","native tick-10 whole-state hash mismatch");
+  checkHash(simulation,"e9420b1c8746b843ec98374fea52297b4fabf65469a2f44580a863cdacecc7e7","native tick-10 whole-state hash mismatch");
   check(simulation.metrics().organisms==1,"native tick-10 population mismatch");
-  near(simulation.metrics().averageEnergy,15.925,1e-12,"native tick-10 energy mismatch");
+  near(simulation.metrics().averageEnergy,13.935,1e-12,"native tick-10 energy mismatch");
   simulation.step(90);
-  check(stateHash(simulation)=="b3eff30756ba7a169bda6653b88b6b154157d8c2807db063c1535547ec9eb5c1","native tick-100 whole-state hash mismatch");
-  if(simulation.metrics().organisms!=39){std::cerr<<"FAIL: native tick-100 population mismatch (actual "<<simulation.metrics().organisms<<", expected 39)\n";++failures;}
-  near(simulation.metrics().averageEnergy,13.923538461538461,1e-12,"native tick-100 energy mismatch");
+  checkHash(simulation,"73ad4155f424815cc5407ce4346ecb8305cc76f4ef5b898fe2ec3bca8efc3146","native tick-100 whole-state hash mismatch");
+  if(simulation.metrics().organisms!=8){std::cerr<<"FAIL: native tick-100 population mismatch (actual "<<simulation.metrics().organisms<<", expected 8)\n";++failures;}
+  near(simulation.metrics().averageEnergy,12.622125,1e-12,"native tick-100 energy mismatch");
   const auto evolvedFounder=simulation.inspect(1);check(evolvedFounder.has_value()&&evolvedFounder->totalDescendants>0,"native lineage descendants were not recorded");
   check(evolvedFounder.has_value()&&evolvedFounder->oxygenTolerance>=.08&&evolvedFounder->oxygenTolerance<=.16&&evolvedFounder->stressRecovery>=.002&&evolvedFounder->frailty>=.35,"observatory physiology fields are invalid");
   const auto descendant=std::find_if(simulation.organisms().begin(),simulation.organisms().end(),[](const life::Organism& organism){return organism.parentId>=0;});if(descendant!=simulation.organisms().end()){const auto childInspection=simulation.inspect(descendant->id);check(childInspection.has_value()&&!childInspection->ancestors.empty()&&!childInspection->mutations.empty(),"native descendant ancestry or mutations missing");}
   const bool hasHealthMutation=std::any_of(simulation.organisms().begin(),simulation.organisms().end(),[](const life::Organism& organism){return std::any_of(organism.mutations.begin(),organism.mutations.end(),[](const std::string& mutation){return mutation.starts_with("Oxygen tolerance")||mutation.starts_with("Respiratory recovery")||mutation.starts_with("Frailty");});});check(hasHealthMutation,"heritable physiology mutations were not recorded in lineage");
   simulation.step(900);
-  if(simulation.metrics().organisms!=768){std::cerr<<"FAIL: native tick-1000 population mismatch (actual "<<simulation.metrics().organisms<<", expected 768)\n";++failures;}
+  if(simulation.metrics().organisms!=713){std::cerr<<"FAIL: native tick-1000 population mismatch (actual "<<simulation.metrics().organisms<<", expected 713)\n";++failures;}
   simulation.step(1'000);const auto toroidalMetrics=simulation.metrics();check(toroidalMetrics.organisms>0&&std::isfinite(toroidalMetrics.averageEnergy),"toroidal long-run ecology became invalid");check(toroidalMetrics.awakeRegions>0&&toroidalMetrics.awakeRegions+toroidalMetrics.sleepingRegions==6,"region sleep accounting mismatch");
   life::NativeSimulation replay(96,60,.2,500,524114809,334462);replay.step(2'000);check(stateHash(replay)==stateHash(simulation),"toroidal simulation replay is not deterministic");check(replay.metrics().organisms==simulation.metrics().organisms&&replay.metrics().nnueEvaluations==simulation.metrics().nnueEvaluations,"toroidal replay metrics diverged");
   replay.takeDirtyTiles();check(replay.takeDirtyTiles().empty(),"dirty tiles were not drained");check(replay.paintResource(0,0,life::ResourceType::Plant,50)&&replay.takeDirtyTiles().size()==1,"resource edit did not dirty exactly one tile");

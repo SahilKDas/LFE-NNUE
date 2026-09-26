@@ -25,7 +25,8 @@ struct Organism {
   double oxygenTolerance{.12},stressRecovery{.01},frailty{1.0},respiratoryRisk{};
   DeathCause deathCauseCode{DeathCause::None};
   std::string deathCause;
-  int perceptionRadius{DefaultSensorRadius}; uint8_t senseChannels{DefaultSenseChannels}; int neuralCost{168};
+  int perceptionRadius{DefaultSensorRadius}; uint16_t senseChannels{DefaultSenseChannels}; int neuralCost{168};
+  uint64_t carrionConsumed{},nutrientsReleased{},decompositionEnergy{};
   int totalDescendants{};
   std::vector<std::string> mutations;
   std::vector<uint16_t> lastFeatures;
@@ -41,7 +42,7 @@ struct LineageSummary { int id{}, generation{}; bool alive{}; };
 struct OrganismInspection {
   int id{},parentId{-1},generation{},birthTick{},deathTick{-1},age{},cellCount{},energy{},minerals{},damage{};
   double mutability{},neuralMutability{},thermalStress{},respiratoryStress{},oxygenTolerance{},stressRecovery{},frailty{},respiratoryRisk{},temperature{},fertility{},metabolicCost{};
-  bool alive{},isMover{};int perceptionRadius{},senseChannels{},neuralCost{},totalDescendants{},attackDurability{},armorDurability{};
+  bool alive{},isMover{};int perceptionRadius{},senseChannels{},neuralCost{},totalDescendants{},attackDurability{},armorDurability{};uint64_t carrionConsumed{},nutrientsReleased{},decompositionEnergy{};int localNutrients{};
   std::string action,diet,terrain,resource,deathCause;
   std::vector<std::string> mutations;
   std::vector<LineageSummary> ancestors,descendants;
@@ -54,7 +55,7 @@ struct NativeMetrics {
   double averageEnergy{},averageMutation{},averageStress{},temperature{},fertility{};
   double oxygen{},carbonDioxide{};
   double averageOxygenTolerance{},averageRespiratoryStress{};
-  int plantEaters{},scavengers{},mineralEaters{},predators{},nnueEvaluations{};
+  int plantEaters{},scavengers{},mineralEaters{},decomposers{},predators{},nnueEvaluations{};
   int respiratoryDeaths{},criticalRespiratory{};
   size_t memoryEstimate{};int awakeRegions{},sleepingRegions{},dirtyTiles{};
 };
@@ -69,6 +70,8 @@ class NativeSimulation {
   std::array<int,7> deathsByCause_{},sampledDeaths_{};
   int sampledBirths_{},nextSpeciesId_{1},selectedSpeciesId_{-1},lastSeason_{-1},lastPopulationPeak_{},crashBaseline_{},crashMinimum_{};
   bool crashActive_{},atmosphereEventActive_{};
+  bool carrionEventActive_{},nutrientCollapseActive_{};
+  int lastDecomposerPopulation_{};
   std::array<uint8_t,3> resourceShortageRuns_{};
   std::array<bool,3> resourceShortageActive_{};
   uint64_t atlasRevision_{};
@@ -86,6 +89,9 @@ class NativeSimulation {
   std::vector<std::vector<size_t>> regionBatches_;
   std::vector<uint8_t> regionAwake_,dirtyTiles_;
   std::vector<uint32_t> dirtyVersions_;
+  std::vector<uint32_t> regionNutrientTotals_;
+  std::vector<uint16_t> nutrientScratch_;
+  uint64_t carrionProcessed_{},sampledCarrionProcessed_{},plantProduced_{},sampledPlantProduced_{};
   std::vector<float> climateTemperature_, climateFertility_; std::vector<int8_t> climateGradient_; std::vector<uint8_t> climateBand_;
   int safeIndex(int x, int y) const;
   int wrappedIndex(int x,int y) const;
@@ -122,6 +128,7 @@ class NativeSimulation {
   void clearBody(const Organism& organism);
   void updateClimateCache();
   void updateAtmosphere();
+  void updateNutrients();
   void pruneLineage();
 public:
   WorldLayers world;

@@ -5,12 +5,13 @@
 #include <vector>
 
 namespace life {
-enum class EvolutionEventType : uint8_t { Season, PopulationPeak, Crash, Recovery, ResourceShortage, AtmosphericStress, Speciation, Extinction, Regeneration };
+enum class EvolutionEventType : uint8_t { Season, PopulationPeak, Crash, Recovery, ResourceShortage, AtmosphericStress, Speciation, Extinction, Regeneration, CarrionAccumulation, NutrientCollapse, NutrientRecovery, DecomposerEmergence, DecomposerExtinction };
 
 struct GenomeDescriptor {
   uint64_t bodyHash{},neuralSignature{},brainGenomeId{};
-  std::array<uint8_t,12> cellCounts{};
-  uint8_t dietMask{},perceptionRadius{},senseChannels{};
+  std::array<uint8_t,13> cellCounts{};
+  uint8_t dietMask{},perceptionRadius{};
+  uint16_t senseChannels{};
   uint16_t moveRange{},birthDistance{},oxygenTolerance{},stressRecovery{},frailty{},mutability{},neuralMutability{};
 };
 
@@ -25,9 +26,9 @@ struct SpeciesSummary {
 };
 
 struct EcologySample {
-  int tick{},population{},births{},plantEaters{},scavengers{},mineralEaters{},predators{},species{},criticalRespiratory{};
+  int tick{},population{},births{},plantEaters{},scavengers{},mineralEaters{},decomposers{},predators{},species{},criticalRespiratory{};
   std::array<int,7> deaths{};
-  uint32_t plant{},carrion{},mineral{};
+  uint32_t plant{},carrion{},mineral{},soilNutrients{},nutrientPoorTiles{},carrionProcessed{},plantProduced{};
   float averageEnergy{},averageBodySize{},averagePerceptionCost{},averageRespiratoryStress{},averageOxygenTolerance{},averageStressRecovery{},averageFrailty{},oxygen{},carbonDioxide{},temperature{},fertility{};
   uint64_t nnueEvaluations{},memoryEstimate{};
 };

@@ -12,5 +12,5 @@ double genomeDistance(const GenomeDescriptor& left,const GenomeDescriptor& right
   const double physiology=((left.dietMask==right.dietMask?0.0:1.0)+std::abs(int(left.oxygenTolerance)-int(right.oxygenTolerance))/800.0+std::abs(int(left.stressRecovery)-int(right.stressRecovery))/230.0+std::abs(int(left.frailty)-int(right.frailty))/1650.0)/4.0;
   return topology*.40+neural*.30+behavior*.15+physiology*.15;
 }
-const char* evolutionEventName(EvolutionEventType type){constexpr const char* names[]={"Season","Population peak","Population crash","Recovery","Resource shortage","Atmospheric stress","Speciation","Extinction","World regeneration"};return names[size_t(type)];}
+const char* evolutionEventName(EvolutionEventType type){constexpr const char* names[]={"Season","Population peak","Population crash","Recovery","Resource shortage","Atmospheric stress","Speciation","Extinction","World regeneration","Carrion accumulation","Nutrient collapse","Nutrient recovery","Decomposer emergence","Decomposer extinction"};return names[size_t(type)];}
 }

@@ -8,14 +8,14 @@
 #include <vector>
 
 namespace life {
-enum SenseChannel : uint8_t { Occupancy=1, Heading=2, Danger=4, Resources=8, Terrain=16, Temperature=32, Fertility=64, Internal=128 };
-inline constexpr uint8_t DefaultSenseChannels = Occupancy | Heading | Danger | Resources | Internal | Temperature | Fertility;
-struct Perception { int radius; uint8_t channels; int cost; };
+enum SenseChannel : uint16_t { Occupancy=1, Heading=2, Danger=4, Resources=8, Terrain=16, Temperature=32, Fertility=64, Internal=128, CarrionDensity=256, SoilNutrients=512 };
+inline constexpr uint16_t DefaultSenseChannels = Occupancy | Heading | Danger | Resources | Internal | Temperature | Fertility;
+struct Perception { int radius; uint16_t channels; int cost; };
 inline Perception clampPerception(int radius, int channels) {
-  int safe = std::clamp(radius, 1, MaximumSensorRadius); uint8_t mask = uint8_t(channels & 255);
+  int safe = std::clamp(radius, 1, MaximumSensorRadius); uint16_t mask = uint16_t(channels & 1023);
   const auto cost = [&] { return ((safe * 2 + 1) * (safe * 2 + 1) - 1) * std::max(1, std::popcount(mask)); };
   while (cost() > MaximumInferenceBudget && safe > 1) --safe;
-  for (int bit = 128; cost() > MaximumInferenceBudget && bit >= 1; bit >>= 1) if (mask & bit) mask &= uint8_t(~bit);
+  for (int bit = 512; cost() > MaximumInferenceBudget && bit >= 1; bit >>= 1) if (mask & bit) mask &= uint16_t(~bit);
   return {safe, mask, cost()};
 }
 

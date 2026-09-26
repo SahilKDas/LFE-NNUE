@@ -8,14 +8,14 @@
 
 namespace life {
 inline constexpr int WorldWidth = 1024, WorldHeight = 640, ClimateCycleTicks = 24'000;
-inline constexpr int EnergyScale = 1'000, StartEnergy = 12'000, PlantEnergy = 4'000, CarrionEnergy = 3'000;
+inline constexpr int EnergyScale = 1'000, StartEnergy = 12'000, PlantEnergy = 4'000, CarrionEnergy = 3'000, DecomposerEnergy = 1'500;
 inline constexpr int CellBaseCost = 2, MoveCost = 15, ProduceCost = 5, AttackCost = 120;
 inline constexpr int KillerDurability = 12, ArmorDurability = 18;
-inline constexpr int BrainSchemaVersion = 3, FeatureCategories = 20, PositionCount = 80;
-inline constexpr int HiddenSize = 16, OutputSize = 5, InputSize = 1'625;
+inline constexpr int BrainSchemaVersion = 4, FeatureCategories = 20, PositionCount = 80;
+inline constexpr int HiddenSize = 16, OutputSize = 5, LegacyInputSize = 1'625, NutrientFeatureOffset = LegacyInputSize, CarrionDensityFeatureOffset = NutrientFeatureOffset + PositionCount, InputSize = CarrionDensityFeatureOffset + PositionCount;
 inline constexpr int DefaultSensorRadius = 2, MaximumSensorRadius = 4, MaximumInferenceBudget = 400;
 
-enum class CellType : uint8_t { Empty, Food, Wall, Mouth, Producer, Mover, Killer, Armor, PlantMouth, ScavengerMouth, MineralMouth, Inert };
+enum class CellType : uint8_t { Empty, Food, Wall, Mouth, Producer, Mover, Killer, Armor, PlantMouth, ScavengerMouth, MineralMouth, Inert, DecomposerMouth };
 enum class TerrainType : uint8_t { Plains, Fertile, Desert, Water, Mountain };
 enum class ResourceType : uint8_t { None, Plant, Carrion, Mineral };
 enum class Action : uint8_t { Up, Down, Left, Right, Wait };
@@ -62,9 +62,9 @@ inline ClimateSample climateAt(int y, int height, int64_t tick) {
     std::min(4, int(std::floor(temperature * 5.0)))};
 }
 
-struct WorldLayers { std::vector<uint8_t> terrain, resources; std::vector<uint16_t> resourceAmount; };
+struct WorldLayers { std::vector<uint8_t> terrain, resources; std::vector<uint16_t> resourceAmount,nutrients; };
 inline WorldLayers generateWorld(int width, int height, uint32_t seed) {
-  WorldLayers world{std::vector<uint8_t>(width * height), std::vector<uint8_t>(width * height), std::vector<uint16_t>(width * height)};
+  WorldLayers world{std::vector<uint8_t>(width * height), std::vector<uint8_t>(width * height), std::vector<uint16_t>(width * height),std::vector<uint16_t>(width*height)};
   for (int y = 0; y < height; ++y) for (int x = 0; x < width; ++x) {
     const int index = y * width + x;
     const double coarse = hash2d(x / 24, y / 24, seed);
@@ -73,6 +73,7 @@ inline WorldLayers generateWorld(int width, int height, uint32_t seed) {
     const auto type = value < .13 ? TerrainType::Water : value > .9 ? TerrainType::Mountain :
       value < .3 ? TerrainType::Desert : value > .67 ? TerrainType::Fertile : TerrainType::Plains;
     world.terrain[index] = uint8_t(type);
+    world.nutrients[index]=type==TerrainType::Fertile?uint16_t(900+detail*500):type==TerrainType::Plains?uint16_t(450+detail*350):type==TerrainType::Desert?uint16_t(80+detail*100):0;
     if (type == TerrainType::Fertile && detail > .7) { world.resources[index] = uint8_t(ResourceType::Plant); world.resourceAmount[index] = 600; }
     else if (type != TerrainType::Water && type != TerrainType::Mountain && detail < .018) { world.resources[index] = uint8_t(ResourceType::Mineral); world.resourceAmount[index] = 1'000; }
   }
