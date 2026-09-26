@@ -2,9 +2,13 @@
 #include <windows.h>
 #include <windowsx.h>
 #include <mmsystem.h>
+#include "app_support.hpp"
 #include "reference.hpp"
 #include "simulation.hpp"
 #include "skia_api.hpp"
+#include "version.hpp"
+#include <fstream>
+#include <stdexcept>
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -89,6 +93,7 @@ std::optional<std::chrono::steady_clock::time_point> pendingInput;
 std::vector<double> inputLatenciesMs;
 std::vector<double> frameIntervalsMs;
 auto previousBenchmarkFrame=measurementStart;
+life::AppSettings appSettings;
 
 constexpr uint32_t terrainColors[] = {0xff2e4330, 0xff2b5b36, 0xff6c5232, 0xff1a3e5f, 0xff4d525a};
 constexpr uint32_t resourceColors[] = {0, 0xff18b437, 0xff8b4b32, 0xffd7bd52};
@@ -208,7 +213,7 @@ void render(HWND window, HDC dc) {
   const int worldStageTop=int(headerHeight);const float viewportCameraY=cameraY;const int stageLeft=std::max(0,int(std::floor(cameraX))),stageRight=std::min(std::max(0,int(contentRight)),int(std::ceil(cameraX+life::WorldWidth*zoom))),stageTop=std::max(worldStageTop,int(std::floor(worldStageTop+viewportCameraY))),stageBottom=std::min(height,int(std::ceil(worldStageTop+viewportCameraY+life::WorldHeight*zoom)));const float cameraY=viewportCameraY+worldStageTop-stageTop;
   constexpr int renderStride=1;
   constexpr int rasterPartitions=10;const auto rasterRows=[&](int partition){for(int screenY=stageTop+partition*renderStride;screenY<stageBottom;screenY+=renderStride*rasterPartitions){const int worldY=int((screenY-stageTop-cameraY)/zoom);if(worldY<0||worldY>=life::WorldHeight)continue;const auto climate=life::climateAt(worldY,life::WorldHeight,metrics.ticks);for(int screenX=stageLeft;screenX<stageRight;screenX+=renderStride){const int worldX=int((screenX-cameraX)/zoom);if(worldX<0||worldX>=life::WorldWidth)continue;const int index=worldY*life::WorldWidth+worldX;const auto terrain=renderTerrain[index],resource=renderResources[index];uint8_t cell=renderCells[index];if(renderStride>1&&!cell){const int nextX=std::min(worldX+1,life::WorldWidth-1),nextY=std::min(worldY+1,life::WorldHeight-1);cell=std::max({renderCells[worldY*life::WorldWidth+nextX],renderCells[nextY*life::WorldWidth+worldX],renderCells[nextY*life::WorldWidth+nextX]});}uint32_t base=terrainColors[terrain];if(activeOverlay==Overlay::Resources)base=resource?resourceColors[resource]:0xff202d3b;else if(activeOverlay==Overlay::Productivity){const double terrainFactor=terrain==uint8_t(life::TerrainType::Fertile)?1.35:terrain==uint8_t(life::TerrainType::Desert)?.3:terrain==uint8_t(life::TerrainType::Plains)?1.0:0.0;const int green=std::clamp(int(45+145*climate.fertility*terrainFactor/1.82),35,190);base=0xff202020u|uint32_t(green)<<8;}else if(activeOverlay==Overlay::Climate){const int red=int(45+190*climate.temperature),blue=int(45+190*(1-climate.temperature));base=0xff000000u|uint32_t(red)<<16|0x00282800u|uint32_t(blue);}else if(activeOverlay==Overlay::Nutrients){const int level=std::min(255,30+int(renderNutrients[index])*225/1600);base=0xff281d16u|uint32_t(level)<<8;}else if(activeOverlay==Overlay::Decomposition){const int carrion=resource==uint8_t(life::ResourceType::Carrion)?200:0,nutrient=std::min(180,int(renderNutrients[index])*180/1600);base=0xff000000u|uint32_t(55+carrion)<<16|uint32_t(35+nutrient)<<8|45;}uint32_t color=cell?cellColors[cell]:(activeOverlay==Overlay::Resources&&resource)?resourceColors[resource]:base;if(activeOverlay==Overlay::Species&&cell&&index<int(renderOwners.size())){const auto found=renderSpeciesByOwner.find(renderOwners[index]);if(found!=renderSpeciesByOwner.end()&&found->second>0){uint32_t hash=uint32_t(found->second)*2654435761u;color=0xff000000u|((64+(hash&127))<<16)|((64+((hash>>8)&127))<<8)|(64+((hash>>16)&127));}}for(int fillY=screenY;fillY<std::min(screenY+renderStride,stageBottom);++fillY){auto* destination=pixels.data()+size_t(fillY)*width;std::fill(destination+screenX,destination+std::min(screenX+renderStride,stageRight),color);}}}};renderWorkers->run(rasterRows);
-  text(canvas,paint,"EVOLUTION, ACCELERATED",30,30,10,0xff81d2c7,true);text(canvas,paint,"Life Engine",30,65,28,0xffffffff,true);text(canvas,paint,"NNUE",176,65,28,0xff81d2c7,true);rectangle(canvas,paint,contentRight-210,25,contentRight-116,58,atlasOpen?0xff81d2c7:0xff3a4b68);text(canvas,paint,"ATLAS",contentRight-190,47,11,atlasOpen?0xff121d29:0xffffffff,true);rectangle(canvas,paint,contentRight-96,37,contentRight-88,45,paused.load()?0xff9099c2:0xff81d2c7);text(canvas,paint,paused.load()?"PAUSED":"RUNNING",contentRight-78,47,12,0xffffffff,false);
+  text(canvas,paint,"EVOLUTION, ACCELERATED",30,30,10,0xff81d2c7,true);text(canvas,paint,"Life Engine",30,65,28,0xffffffff,true);text(canvas,paint,"NNUE",176,65,28,0xff81d2c7,true);text(canvas,paint,"v" LFE_VERSION_STRING,249,64,10,0xffb8c3d1);rectangle(canvas,paint,contentRight-210,25,contentRight-116,58,atlasOpen?0xff81d2c7:0xff3a4b68);text(canvas,paint,"ATLAS",contentRight-190,47,11,atlasOpen?0xff121d29:0xffffffff,true);rectangle(canvas,paint,contentRight-96,37,contentRight-88,45,paused.load()?0xff9099c2:0xff81d2c7);text(canvas,paint,paused.load()?"PAUSED":"RUNNING",contentRight-78,47,12,0xffffffff,false);
   const float panelX=contentRight+15,panelRight=width-15,cardGap=8,cardWidth=(aside-38)/2;
   for (int column = 0; column < 2; ++column)
     for (int row = 0; row < 2; ++row) {
@@ -271,23 +276,29 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wParam, LPARAM lPar
     cameraY = cursor.y-82 - (cursor.y-82-cameraY) * zoom / previous;
     InvalidateRect(window, nullptr, FALSE); return 0;
   }
-  if (message == WM_DESTROY) { PostQuitMessage(0); return 0; }
+  if (message == WM_DESTROY) { RECT bounds{};if(GetWindowRect(window,&bounds)){appSettings.windowX=bounds.left;appSettings.windowY=bounds.top;appSettings.windowWidth=bounds.right-bounds.left;appSettings.windowHeight=bounds.bottom-bounds.top;}appSettings.maximized=IsZoomed(window)!=FALSE;appSettings.requestedTps=requestedTps.load();appSettings.requestedFps=requestedFps.load();appSettings.overlay=int(activeOverlay);if(!life::saveSettings(appSettings))life::logMessage("warning: settings could not be saved");life::logMessage("clean shutdown");PostQuitMessage(0); return 0; }
   return DefWindowProcW(window, message, wParam, lParam);
 }
 }
 
+LONG WINAPI reportCrash(EXCEPTION_POINTERS* details){std::ostringstream message;message<<"unhandled exception code=0x"<<std::hex<<(details&&details->ExceptionRecord?details->ExceptionRecord->ExceptionCode:0)<<" address="<<(details&&details->ExceptionRecord?details->ExceptionRecord->ExceptionAddress:nullptr);life::logMessage(message.str());return EXCEPTION_EXECUTE_HANDLER;}
+
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR commandLine, int show) {
+  life::initializeLog();SetUnhandledExceptionFilter(reportCrash);appSettings=life::loadSettings();requestedTps.store(appSettings.requestedTps);requestedFps.store(appSettings.requestedFps);activeOverlay=Overlay(appSettings.overlay);
   const std::wstring arguments=commandLine?commandLine:L"";if(const auto marker=arguments.find(L"--ui-benchmark");marker!=std::wstring::npos){uiBenchmark=true;const auto equals=arguments.find(L'=',marker);if(equals!=std::wstring::npos)uiBenchmarkSeconds=std::clamp(_wtoi(arguments.c_str()+equals+1),1,600);simulation.seedBenchmarkMovers(10'000);requestedTps.store(60);requestedFps.store(60);}if(const auto marker=arguments.find(L"--fps=");marker!=std::wstring::npos){const int value=_wtoi(arguments.c_str()+marker+6);if(value>=30&&value<=360&&value%30==0)requestedFps.store(value);}
-  try { api = loadSkia(); }
-  catch (...) { MessageBoxW(nullptr, L"The embedded Skia renderer could not be loaded.", L"Life Engine", MB_ICONERROR); return 1; }
+  try { api = loadSkia();life::logMessage("Skia renderer loaded"); }
+  catch (const std::exception& error) {life::logMessage(std::string("Skia initialization failed: ")+error.what());MessageBoxW(nullptr,L"The embedded Skia renderer could not be loaded. See the local diagnostic log for details.",life::AppDisplayName,MB_ICONERROR);return 1;}
+  catch (...) {life::logMessage("Skia initialization failed with an unknown error");MessageBoxW(nullptr,L"The embedded Skia renderer could not be loaded. See the local diagnostic log for details.",life::AppDisplayName,MB_ICONERROR);return 1;}
+  if(arguments.find(L"--self-test")!=std::wstring::npos){try{life::NativeSimulation smoke(96,60,.2,500,53,17);for(int tick=0;tick<120;++tick)smoke.step();const auto metrics=smoke.metrics();if(metrics.ticks!=120||metrics.organisms<1||!api)throw std::runtime_error("simulation invariant failed");const auto report=libraryPath().parent_path()/"self-test.txt";std::ofstream output(report);output<<"LFE-NNUE v"<<life::AppVersion<<" self-test PASS\n"<<"ticks="<<metrics.ticks<<" organisms="<<metrics.organisms<<"\n";life::logMessage("self-test passed");api.reset();return 0;}catch(const std::exception& error){life::logMessage(std::string("self-test failed: ")+error.what());api.reset();return 2;}}
   fontManager=api->fontManagerCreateDefault();auto normal=api->fontStyleNew(400,5,0),bold=api->fontStyleNew(700,5,0);regularTypeface=api->fontManagerCreateTypeface(fontManager,"Arial",normal);boldTypeface=api->fontManagerCreateTypeface(fontManager,"Arial",bold);api->fontStyleDelete(normal);api->fontStyleDelete(bold);
   WNDCLASSW type{}; type.lpfnWndProc = procedure; type.hInstance = instance;
   type.lpszClassName = L"LifeEngineSkiaPreview"; type.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));
   RegisterClassW(&type);
-  HWND window = CreateWindowExW(0, type.lpszClassName, L"Life Engine NNUE",
-    WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 1500, 900, nullptr, nullptr, instance, nullptr);
+  const int initialX=appSettings.windowX<0?CW_USEDEFAULT:appSettings.windowX,initialY=appSettings.windowY<0?CW_USEDEFAULT:appSettings.windowY;
+  HWND window = CreateWindowExW(0,type.lpszClassName,life::AppDisplayName,WS_OVERLAPPEDWINDOW,initialX,initialY,appSettings.windowWidth,appSettings.windowHeight,nullptr,nullptr,instance,nullptr);
+  if(!window){life::logMessage("window creation failed");MessageBoxW(nullptr,L"The application window could not be created.",life::AppDisplayName,MB_ICONERROR);api.reset();return 1;}
   renderWorkers=std::make_unique<RenderWorkers>();
-  ShowWindow(window, show);
+  ShowWindow(window,appSettings.maximized?SW_SHOWMAXIMIZED:show);life::logMessage("main window ready");
   timeBeginPeriod(1);
   if(uiBenchmark){uiBenchmarkStart=nextBenchmarkInput=measurementStart=lastRenderRequest=previousBenchmarkFrame=std::chrono::steady_clock::now();uiBenchmarkTicks.store(0);uiBenchmarkFrames=uiBenchmarkInputs=measuredFrames=0;uiBenchmarkRenderMs=0;presentationDrops.store(0);inputLatenciesMs.clear();frameIntervalsMs.clear();pendingInput.reset();}
   simulationThread=std::jthread([](std::stop_token stop){auto next=std::chrono::steady_clock::now();while(!stop.stop_requested()){if(paused.load()){next=std::chrono::steady_clock::now();std::this_thread::sleep_for(std::chrono::milliseconds(2));continue;}const int target=std::max(1,requestedTps.load());const auto interval=std::chrono::duration<double>(1.0/target);const auto now=std::chrono::steady_clock::now();if(now<next){std::this_thread::sleep_until(next);continue;}{std::unique_lock lock(simulationMutex);simulation.step();}measuredTicks.fetch_add(1);if(uiBenchmark)uiBenchmarkTicks.fetch_add(1);next+=std::chrono::duration_cast<std::chrono::steady_clock::duration>(interval);if(std::chrono::steady_clock::now()-next>std::chrono::milliseconds(250))next=std::chrono::steady_clock::now();}});

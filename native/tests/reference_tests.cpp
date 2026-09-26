@@ -1,4 +1,5 @@
 #include "reference.hpp"
+#include "app_support.hpp"
 #include "nnue.hpp"
 #include "simulation.hpp"
 #define WIN32_LEAN_AND_MEAN
@@ -35,6 +36,7 @@ std::string stateHash(const life::NativeSimulation& simulation){BCRYPT_ALG_HANDL
 }
 
 int main() {
+  {const auto settings=life::parseSettings("requested_tps=999\nrequested_fps=61\noverlay=99\nwindow_width=10\nwindow_height=99999\nmaximized=1\n");check(settings.requestedTps==120&&settings.requestedFps==30&&settings.overlay==6,"settings validation failed");check(settings.windowWidth==960&&settings.windowHeight==4320&&settings.maximized,"window settings validation failed");const auto roundTrip=life::parseSettings(life::serializeSettings(settings));check(roundTrip.requestedTps==settings.requestedTps&&roundTrip.windowHeight==settings.windowHeight&&roundTrip.maximized,"settings round trip failed");}
   static_assert(int(life::CellType::Inert) == 11);
   static_assert(int(life::Action::Wait) == 4);
   static_assert(life::LegacyInputSize == life::PositionCount * life::FeatureCategories + 25);
