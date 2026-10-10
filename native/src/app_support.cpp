@@ -19,7 +19,7 @@ void normalize(AppSettings& value) {
   value.schema=1;
   value.requestedTps=std::clamp(value.requestedTps,1,120);
   if(value.requestedFps<30||value.requestedFps>360||value.requestedFps%30) value.requestedFps=30;
-  value.overlay=std::clamp(value.overlay,0,6);
+  value.overlay=std::clamp(value.overlay,0,7);
   value.windowWidth=std::clamp(value.windowWidth,960,7680);
   value.windowHeight=std::clamp(value.windowHeight,640,4320);
   value.windowX=std::clamp(value.windowX,-32000,32000);

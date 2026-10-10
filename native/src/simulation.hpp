@@ -43,7 +43,7 @@ struct OrganismInspection {
   int id{},parentId{-1},generation{},birthTick{},deathTick{-1},age{},cellCount{},energy{},minerals{},damage{};
   double mutability{},neuralMutability{},thermalStress{},respiratoryStress{},oxygenTolerance{},stressRecovery{},frailty{},respiratoryRisk{},temperature{},fertility{},metabolicCost{};
   bool alive{},isMover{};int perceptionRadius{},senseChannels{},neuralCost{},totalDescendants{},attackDurability{},armorDurability{};uint64_t carrionConsumed{},nutrientsReleased{},decompositionEnergy{};int localNutrients{};
-  std::string action,diet,terrain,resource,deathCause;
+  std::string action,diet,terrain,resource,habitat,deathCause;int elevation{};
   std::vector<std::string> mutations;
   std::vector<LineageSummary> ancestors,descendants;
   std::vector<uint16_t> senses;
@@ -57,6 +57,7 @@ struct NativeMetrics {
   double averageOxygenTolerance{},averageRespiratoryStress{};
   int plantEaters{},scavengers{},mineralEaters{},decomposers{},predators{},nnueEvaluations{};
   int respiratoryDeaths{},criticalRespiratory{};
+  int caveOrganisms{},bridgeOrganisms{};double averageElevation{};
   size_t memoryEstimate{};int awakeRegions{},sleepingRegions{},dirtyTiles{};
 };
 
@@ -142,6 +143,7 @@ public:
   bool paintTerrain(int x, int y, TerrainType terrain);
   bool paintResource(int x, int y, ResourceType resource, uint16_t amount = 1000);
   bool paintNutrients(int x,int y,uint16_t amount=1200);
+  bool paintHabitat(int x,int y,HabitatType habitat);
   const Organism* organismAt(int x, int y) const;
   void select(int id) { selectedId_ = id; }
   std::optional<OrganismInspection> inspect(int id) const;
