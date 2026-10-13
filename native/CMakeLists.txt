@@ -27,7 +27,7 @@ target_link_options(life_engine_native_core PRIVATE -municode -static -static-li
 target_link_libraries(life_engine_native_core PRIVATE user32 gdi32)
 target_compile_options(life_engine PRIVATE -O3 -Wall -Wextra)
 target_link_options(life_engine PRIVATE -municode -static -static-libgcc -static-libstdc++)
-target_link_libraries(life_engine PRIVATE user32 gdi32 winmm)
+target_link_libraries(life_engine PRIVATE user32 gdi32 winmm comdlg32)
 add_custom_command(TARGET life_engine POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/skia/x64/libSkiaSharp.dll
@@ -36,6 +36,10 @@ add_custom_command(TARGET life_engine POST_BUILD
     $<TARGET_FILE:life_engine>
     $<TARGET_FILE_DIR:life_engine>/life_engine_skia_preview.exe)
 if(BUILD_TESTING)
+  add_executable(life_engine_depth_tests tests/depth_tests.cpp src/simulation.cpp src/atlas.cpp)
+  target_include_directories(life_engine_depth_tests PRIVATE src)
+  target_compile_options(life_engine_depth_tests PRIVATE -O2)
+  add_test(NAME native_depth_save_replay COMMAND life_engine_depth_tests)
   add_executable(life_engine_native_tests tests/reference_tests.cpp src/simulation.cpp src/atlas.cpp src/app_support.cpp)
   target_include_directories(life_engine_native_tests PRIVATE src)
   target_compile_options(life_engine_native_tests PRIVATE -O2 -Wall -Wextra)

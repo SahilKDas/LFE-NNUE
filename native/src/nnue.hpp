@@ -20,6 +20,7 @@ inline Perception clampPerception(int radius, int channels) {
 }
 
 class Nnue {
+  friend class NativeSimulation;
   std::vector<std::array<float, HiddenSize>> inputWeights;
   std::array<float, HiddenSize> hiddenBias{}, accumulator{};
   std::array<std::array<float, HiddenSize>, OutputSize> outputWeights{};

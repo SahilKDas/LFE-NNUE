@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <filesystem>
 
 namespace life {
 enum class DeathCause : uint8_t { None, Starvation, Combat, OldAge, ThermalStress, Terrain, RespiratoryFailure };
@@ -92,6 +93,7 @@ class NativeSimulation {
   std::vector<uint32_t> dirtyVersions_;
   std::vector<uint32_t> regionNutrientTotals_;
   std::vector<uint16_t> nutrientScratch_;
+  std::vector<int> drainageNutrientScratch_,drainageWaterScratch_;
   uint64_t carrionProcessed_{},sampledCarrionProcessed_{},plantProduced_{},sampledPlantProduced_{};
   std::vector<float> climateTemperature_, climateFertility_; std::vector<int8_t> climateGradient_; std::vector<uint8_t> climateBand_;
   int safeIndex(int x, int y) const;
@@ -130,9 +132,16 @@ class NativeSimulation {
   void updateClimateCache();
   void updateAtmosphere();
   void updateNutrients();
+  void updateDrainage();
+  void archiveState(struct StateArchive& archive);
   void pruneLineage();
 public:
   WorldLayers world;
+  struct SavedView {float zoom{1},cameraX{},cameraY{};int overlay{},selectedOrganism{-1},fps{30},tps{60},atlasTab{},timelineWindow{600};bool weather{true},atlasOpen{},paused{};int tool{};uint32_t nextWorldSeed{2};bool habitatHistory{};} savedView;
+  std::vector<uint16_t> moisture;
+  int rainfall() const;
+  void save(const std::filesystem::path& path);
+  void load(const std::filesystem::path& path);
   std::vector<uint8_t> cells;
   std::vector<int32_t> owners;
   NativeSimulation(int width, int height, double foodChance, int lifespan, uint32_t worldSeed, uint32_t randomSeed, int lineageLimit = 20'000);

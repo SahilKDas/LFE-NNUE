@@ -5,7 +5,7 @@
 #include <vector>
 
 namespace life {
-enum class EvolutionEventType : uint8_t { Season, PopulationPeak, Crash, Recovery, ResourceShortage, AtmosphericStress, Speciation, Extinction, Regeneration, CarrionAccumulation, NutrientCollapse, NutrientRecovery, DecomposerEmergence, DecomposerExtinction };
+enum class EvolutionEventType : uint8_t { Season, PopulationPeak, Crash, Recovery, ResourceShortage, AtmosphericStress, Speciation, Extinction, Regeneration, CarrionAccumulation, NutrientCollapse, NutrientRecovery, DecomposerEmergence, DecomposerExtinction, HabitatShift };
 
 struct GenomeDescriptor {
   uint64_t bodyHash{},neuralSignature{},brainGenomeId{};
@@ -23,9 +23,14 @@ struct SpeciesSummary {
   std::array<uint8_t,25> recentDeathCauses{};
   uint8_t recentDeathCount{},recentDeathCursor{};
   GenomeDescriptor representative;
+  std::array<int,3> habitatPopulation{};
+  float averageElevation{};
+  uint8_t dominantHabitat{};
 };
 
 struct EcologySample {
+  int cavePopulation{},bridgePopulation{},rainfall{};
+  float averageElevation{},averageMoisture{};
   int tick{},population{},births{},plantEaters{},scavengers{},mineralEaters{},decomposers{},predators{},species{},criticalRespiratory{};
   std::array<int,7> deaths{};
   uint32_t plant{},carrion{},mineral{},soilNutrients{},nutrientPoorTiles{},carrionProcessed{},plantProduced{};

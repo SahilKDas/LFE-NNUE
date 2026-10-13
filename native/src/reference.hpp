@@ -25,6 +25,8 @@ class Mulberry32 {
   uint32_t state;
 public:
   explicit Mulberry32(uint32_t seed) : state(seed) {}
+  uint32_t checkpoint() const{return state;}
+  void restore(uint32_t value){state=value;}
   double operator()() {
     state += 0x6d2b79f5u;
     uint32_t value = (state ^ (state >> 15)) * (1u | state);
