@@ -31,6 +31,7 @@ struct Organism {
   uint64_t carrionConsumed{},nutrientsReleased{},decompositionEnergy{};
   int totalDescendants{};
   int directOffspring{};
+  bool offspringCountComplete{true};
   std::vector<std::string> mutations;
   std::vector<uint16_t> lastFeatures;
   std::array<float,OutputSize> lastOutputs{};
@@ -67,7 +68,7 @@ struct NativeMetrics {
 struct WatchedPose {int id{-1},x{},y{},rotation{};bool alive{},mover{};};
 struct WatchedSnapshot {
   WatchedPose pose;int tick{},age{},generation{},energy{},directChildren{},livingChildren{},livingDescendants{},nextDescendant{-1},decisionCount{};
-  std::string habitat,deathCause;std::vector<BodyCell> body;DecisionRecord decision;bool hasDecision{};
+  std::string habitat,deathCause;std::vector<BodyCell> body;DecisionRecord decision;bool hasDecision{},offspringCountComplete{true};
 };
 
 class NativeSimulation {
@@ -156,7 +157,7 @@ public:
   struct SavedView {float zoom{1},cameraX{},cameraY{};int overlay{},selectedOrganism{-1},fps{30},tps{60},atlasTab{},timelineWindow{600};bool weather{true},atlasOpen{},paused{};int tool{};uint32_t nextWorldSeed{2};bool habitatHistory{};} savedView;
   std::vector<uint16_t> moisture;
   int rainfall() const;
-  void save(const std::filesystem::path& path);
+  void save(const std::filesystem::path& path,uint32_t archiveVersion=2);
   void load(const std::filesystem::path& path);
   std::vector<uint8_t> cells;
   std::vector<int32_t> owners;
@@ -164,6 +165,7 @@ public:
   void reset();
   void regenerate(uint32_t seed);
   int seedBenchmarkMovers(int count);
+  int seedBenchmarkFamily(int stride=4);
   void setBenchmarkLifecycle(bool enabled){reproductionEnabled_=mortalityEnabled_=enabled;}
   bool paintTerrain(int x, int y, TerrainType terrain);
   bool paintResource(int x, int y, ResourceType resource, uint16_t amount = 1000);
@@ -188,6 +190,7 @@ public:
   int lineageRecordCount() const { return int(organisms_.size()); }
   int deadLineageRecordCount() const { return deadCount_; }
   int birthCount() const { return births_; }
+  int tickCount() const{return ticks_;}
   int respiratoryDeathCount() const { return respiratoryDeaths_; }
   const std::vector<Organism>& organisms() const { return organisms_; }
 };

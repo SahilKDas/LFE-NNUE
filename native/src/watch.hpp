@@ -7,6 +7,7 @@ namespace life {
 enum class FamilyRole : uint8_t { Unrelated, Root, Child, Descendant };
 struct DecisionRecord {
   int tick{},x{},y{},rotation{},radius{},action{-1};uint16_t channels{},featureCount{};
+  int direction{},temperatureBand{},gradient{},season{},fertilityBand{};bool highEnergy{},damaged{};
   std::array<uint16_t,InputSize> features{};
   std::array<float,OutputSize> outputs{};
 };
