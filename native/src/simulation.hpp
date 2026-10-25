@@ -2,6 +2,7 @@
 #include "nnue.hpp"
 #include "reference.hpp"
 #include "atlas.hpp"
+#include "watch.hpp"
 #include <cstdint>
 #include <array>
 #include <optional>
@@ -29,6 +30,7 @@ struct Organism {
   int perceptionRadius{DefaultSensorRadius}; uint16_t senseChannels{DefaultSenseChannels}; int neuralCost{168};
   uint64_t carrionConsumed{},nutrientsReleased{},decompositionEnergy{};
   int totalDescendants{};
+  int directOffspring{};
   std::vector<std::string> mutations;
   std::vector<uint16_t> lastFeatures;
   std::array<float,OutputSize> lastOutputs{};
@@ -60,6 +62,12 @@ struct NativeMetrics {
   int respiratoryDeaths{},criticalRespiratory{};
   int caveOrganisms{},bridgeOrganisms{};double averageElevation{};
   size_t memoryEstimate{};int awakeRegions{},sleepingRegions{},dirtyTiles{};
+};
+
+struct WatchedPose {int id{-1},x{},y{},rotation{};bool alive{},mover{};};
+struct WatchedSnapshot {
+  WatchedPose pose;int tick{},age{},generation{},energy{},directChildren{},livingChildren{},livingDescendants{},nextDescendant{-1},decisionCount{};
+  std::string habitat,deathCause;std::vector<BodyCell> body;DecisionRecord decision;bool hasDecision{};
 };
 
 class NativeSimulation {
@@ -96,6 +104,13 @@ class NativeSimulation {
   std::vector<int> drainageNutrientScratch_,drainageWaterScratch_;
   uint64_t carrionProcessed_{},sampledCarrionProcessed_{},plantProduced_{},sampledPlantProduced_{};
   std::vector<float> climateTemperature_, climateFertility_; std::vector<int8_t> climateGradient_; std::vector<uint8_t> climateBand_;
+  int watchedId_{-1};std::vector<DecisionRecord> watchedDecisions_;size_t decisionCursor_{},decisionCount_{};
+  mutable int familyRoot_{-2},familyBirths_{-1},familyDeaths_{-1};mutable size_t familyRecords_{SIZE_MAX};
+  mutable std::unordered_map<int,FamilyRole> familyRoles_;
+  mutable std::vector<int> familyPath_;
+  mutable std::vector<LineageSummary> familyDescendants_;
+  void refreshFamily(int root) const;
+  void captureDecision(const Organism& organism);
   int safeIndex(int x, int y) const;
   int wrappedIndex(int x,int y) const;
   int wrapX(int x) const;
@@ -137,6 +152,7 @@ class NativeSimulation {
   void pruneLineage();
 public:
   WorldLayers world;
+  FollowPreferences followPreferences;
   struct SavedView {float zoom{1},cameraX{},cameraY{};int overlay{},selectedOrganism{-1},fps{30},tps{60},atlasTab{},timelineWindow{600};bool weather{true},atlasOpen{},paused{};int tool{};uint32_t nextWorldSeed{2};bool habitatHistory{};} savedView;
   std::vector<uint16_t> moisture;
   int rainfall() const;
@@ -155,6 +171,10 @@ public:
   bool paintHabitat(int x,int y,HabitatType habitat);
   const Organism* organismAt(int x, int y) const;
   void select(int id) { selectedId_ = id; }
+  void watch(int id);
+  WatchedPose watchedPose() const;
+  WatchedSnapshot watchedSnapshot(size_t stepsBack=0) const;
+  const std::unordered_map<int,FamilyRole>& familyRoles(int root) const{refreshFamily(root);return familyRoles_;}
   std::optional<OrganismInspection> inspect(int id) const;
   void step(int count = 1);
   NativeMetrics metrics() const;
