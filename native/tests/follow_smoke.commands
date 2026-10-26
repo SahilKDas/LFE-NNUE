@@ -1,0 +1,74 @@
+# Runs the actual native renderer without creating a window or sending desktop input.
+resize 1920 1080
+seed 1000
+select family
+follow
+step 40
+frame 60 16.6666667
+assert following on
+assert wrapped on
+assert target family
+assert family-min 200
+assert decisions-min 1
+assert snapshot-coherent
+assert palette-coherent
+overlay resources
+frame
+assert palette-coherent
+overlay nutrients
+frame
+assert palette-coherent
+overlay species
+frame
+assert palette-coherent
+overlay terrain
+frame
+export headless/follow-detail.png
+state headless/follow-detail.json
+mark-camera
+atlas on
+frame 30 33.3333333
+assert camera-held
+atlas off
+compact on
+assert compact on
+export headless/follow-compact.png
+save headless/follow-test.lfesave
+release
+pan 30 20
+assert following off
+load headless/follow-test.lfesave
+assert following on
+assert target family
+step 20
+frame 30 16.6666667
+compact off
+resize 960 640
+zoom 4
+frame 30 16.6666667
+assert following on
+export headless/follow-small.png
+resize 1920 1080
+zoom 1
+frame 30 16.6666667
+paint-selected-mountain
+frame
+assert palette-coherent
+assert alive off
+assert following off
+mark-camera
+step 10
+frame 30 16.6666667
+assert camera-held
+export headless/follow-death.png
+save headless/follow-dead.lfesave
+load headless/follow-dead.lfesave
+assert following off
+assert target family
+assert alive off
+frame
+descendant
+frame 30 16.6666667
+assert following on
+assert alive on
+state headless/follow-descendant.json

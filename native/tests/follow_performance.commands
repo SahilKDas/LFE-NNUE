@@ -1,0 +1,12 @@
+resize 1920 1080
+seed 10000
+select family
+follow
+step 120
+frame 60 16.6666667
+assert following on
+assert family-min 1000
+assert decisions-min 1
+export headless/follow-10k.png
+benchmark 60 headless/follow-performance.json
+state headless/follow-after-benchmark.json

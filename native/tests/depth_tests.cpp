@@ -5,7 +5,7 @@
 namespace life {struct NativeSimulationTestAccess {static void drainage(NativeSimulation& s){s.updateDrainage();}static void tick(NativeSimulation& s,int value){s.ticks_=value;}};}
 void require(bool valid,const char* message){if(!valid)throw std::runtime_error(message);}
 int main(){try{
-  const auto path=std::filesystem::temp_directory_path()/"lfe-depth-test.lfesave";
+  const auto directory=std::filesystem::current_path()/"test-archives";std::filesystem::create_directories(directory);const auto path=directory/"depth-test.lfesave";
   life::NativeSimulation original(96,60,.2,500,524114809,334462);original.seedBenchmarkMovers(100);original.step(360);original.select(1);original.savedView.zoom=2.5f;original.savedView.cameraX=-137;original.savedView.weather=false;original.savedView.fps=120;original.savedView.tool=11;original.save(path);original.save(path);
   life::NativeSimulation restored(96,60,.2,500,4,9);restored.load(path);
   require(original.cells==restored.cells&&original.owners==restored.owners&&original.moisture==restored.moisture,"Roundtrip world differs");

@@ -42,4 +42,11 @@ struct FollowCamera {
   }
 };
 struct FollowPreferences {int target{-1};bool enabled{},family{true},compact{},wrapped{};};
+struct FollowHudLayout {
+  float left{16},top{96},right{},bottom{},buttonWidth{};bool compact{};
+  FollowHudLayout(float viewportRight,bool requestedCompact):right(std::min(viewportRight-16,456.f)),bottom(top+((requestedCompact||viewportRight<950)?116:434)),buttonWidth((right-left-30)/4),compact(requestedCompact||viewportRight<950){}
+  bool visible() const{return right-left>=280;}
+  bool contains(float x,float y) const{return visible()&&x>=left&&x<=right&&y>=top&&y<=bottom;}
+  int buttonAt(float x,float y) const{if(!visible()||y<top+69||y>top+92)return -1;for(int index=0;index<4;++index){const float begin=left+6+index*(buttonWidth+6);if(x>=begin&&x<=begin+buttonWidth)return index;}return -1;}
+};
 }
