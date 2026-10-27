@@ -3,6 +3,7 @@
 #include "reference.hpp"
 #include "atlas.hpp"
 #include "watch.hpp"
+#include "analysis_pool.hpp"
 #include <cstdint>
 #include <array>
 #include <optional>
@@ -17,29 +18,32 @@ enum class DeathCause : uint8_t { None, Starvation, Combat, OldAge, ThermalStres
 const char* deathCauseName(DeathCause cause);
 struct BodyCell { CellType type; int x, y; int durability{}; };
 struct Organism {
-  int id{}, parentId{-1}, generation{}, birthTick{}, deathTick{-1}, x{}, y{};
+  // Keep the simulation's working set together; cold lineage text follows it.
+  // Archive fields are written explicitly, so this does not change save layout.
+  int id{}, parentId{-1}, x{}, y{};
   std::vector<BodyCell> cells;
-  int energy{StartEnergy}, minerals{}, lifetime{}, damage{}, mutability{5}; double neuralMutability{8};
+  int energy{StartEnergy}, minerals{}, lifetime{}, damage{};
   int birthDistance{4}, moveRange{4}, moveCount{}, direction{}, rotation{};
+  uint16_t senseChannels{DefaultSenseChannels};
   bool living{true}, isProducer{}, isMover{}, isConsumer{}, isAttacker{};
+  DeathCause deathCauseCode{DeathCause::None};
+  int neuralCost{168};
   double thermalStress{};
   double hypoxiaStress{};
   double oxygenTolerance{.12},stressRecovery{.01},frailty{1.0},respiratoryRisk{};
-  DeathCause deathCauseCode{DeathCause::None};
-  std::string deathCause;
-  int perceptionRadius{DefaultSensorRadius}; uint16_t senseChannels{DefaultSenseChannels}; int neuralCost{168};
-  uint64_t carrionConsumed{},nutrientsReleased{},decompositionEnergy{};
-  int totalDescendants{};
-  int directOffspring{};
-  bool offspringCountComplete{true};
-  std::vector<std::string> mutations;
+  int perceptionRadius{DefaultSensorRadius},lastAction{-1};
+  std::shared_ptr<Nnue> brain;
   std::vector<uint16_t> lastFeatures;
   std::array<float,OutputSize> lastOutputs{};
-  int lastAction{-1};
+  int mutability{5};double neuralMutability{8};
   size_t activeIndex{};
+  int generation{},birthTick{},deathTick{-1},totalDescendants{},directOffspring{};
+  bool offspringCountComplete{true};
   uint64_t brainGenomeId{};
   int speciesId{-1};
-  std::shared_ptr<Nnue> brain;
+  uint64_t carrionConsumed{},nutrientsReleased{},decompositionEnergy{};
+  std::vector<std::string> mutations;
+  std::string deathCause;
 };
 
 struct LineageSummary { int id{}, generation{}; bool alive{}; };
@@ -64,6 +68,7 @@ struct NativeMetrics {
   int caveOrganisms{},bridgeOrganisms{};double averageElevation{};
   size_t memoryEstimate{};int awakeRegions{},sleepingRegions{},dirtyTiles{};
 };
+struct TickWork { double organisms{},environment{},lineage{},atlas{},physiology{},reproduction{},feeding{},neural{}; };
 
 struct WatchedPose {int id{-1},x{},y{},rotation{};bool alive{},mover{};};
 struct WatchedSnapshot {
@@ -78,6 +83,8 @@ class NativeSimulation {
   double atmosphericOxygen_{.21},carbonDioxide_{.0004};
   bool reproductionEnabled_{true}, mortalityEnabled_{true}; int populationTarget_{};
   int births_{};
+  bool profileTicks_{};
+  TickWork tickWork_;
   std::array<int,7> deathsByCause_{},sampledDeaths_{};
   int sampledBirths_{},nextSpeciesId_{1},selectedSpeciesId_{-1},lastSeason_{-1},lastPopulationPeak_{},crashBaseline_{},crashMinimum_{};
   bool crashActive_{},atmosphereEventActive_{};
@@ -90,11 +97,26 @@ class NativeSimulation {
   std::vector<EcologySample> timeline_;
   std::vector<EvolutionEvent> evolutionEvents_;
   std::vector<Organism*> classificationBuffer_;
+  SpeciesDistanceCache classificationCache_;
+  std::shared_ptr<AnalysisPool> analysisPool_;
+  bool parallelAnalysis_{true};
+  std::vector<Nnue::MutationChange> neuralMutationScratch_;
+  std::vector<GenomeDescriptor> classificationDescriptors_;
+  std::vector<SpeciesDistanceCache::Entry*> classificationJobs_;
+  std::vector<SpeciesDistanceCache::Entry*> classificationMatches_;
+  uint32_t classificationJobEpoch_{};
+  struct PreparedPhysiology {int energy{};double temperature{},discomfort{},stressDelta{},agePressure{},energyPressure{},bodyPressure{};};
+  std::vector<PreparedPhysiology> preparedPhysiology_;
   int respiratoryDeaths_{},lastRespiratoryDeathTick_{-10};
   struct RespiratoryCandidate { double risk{}; int id{}; };
   std::vector<RespiratoryCandidate> respiratoryCandidates_;
   std::unordered_map<int,size_t> slotById_;
   std::vector<size_t> activeSlots_;
+  std::vector<uint32_t> ownerSlots_;
+  std::vector<int> pruneChildren_,pruneActiveIds_;
+  std::vector<uint8_t> pruneProtected_,pruneRemoved_;
+  std::vector<size_t> pruneParents_,pruneSlotRemap_;
+  int64_t atmosphereCells_{},atmosphereMovers_{},atmosphereProducers_{};
   static constexpr int RegionSize=32,DirtyTileSize=16;
   int regionColumns_{},regionRows_{},dirtyColumns_{},dirtyRows_{};
   std::vector<std::vector<size_t>> regionBatches_;
@@ -103,7 +125,13 @@ class NativeSimulation {
   std::array<std::vector<uint32_t>,4> dirtyLayerVersions_;
   std::vector<uint32_t> regionNutrientTotals_;
   std::vector<uint16_t> nutrientScratch_;
+  std::vector<uint8_t> nutrientResourceDirty_;
+  std::vector<uint32_t> nutrientDecayRows_;
+  std::vector<uint32_t> soilResourceTileChanges_,soilNutrientTileChanges_;
+  double birthOxygenCache_{-1},birthCarbonCache_{-1};uint64_t birthThresholdCache_{};
   std::vector<int> drainageNutrientScratch_,drainageWaterScratch_;
+  std::vector<int> drainageFlowTargets_;
+  std::vector<uint8_t> drainageFlows_,drainageNutrientFlows_;
   uint64_t carrionProcessed_{},sampledCarrionProcessed_{},plantProduced_{},sampledPlantProduced_{};
   std::vector<float> climateTemperature_, climateFertility_; std::vector<int8_t> climateGradient_; std::vector<uint8_t> climateBand_;
   int watchedId_{-1};std::vector<DecisionRecord> watchedDecisions_;size_t decisionCursor_{},decisionCount_{};
@@ -120,10 +148,12 @@ class NativeSimulation {
   void markDirtyIndex(int index,uint8_t layers=15);
   void markAllDirty();
   void rebuildRegionIndex();
+  void rebuildOwnerSlots();
   std::pair<int,int> rotated(int x, int y, int direction) const;
   void placeBody(const Organism& organism);
   void refreshCapabilities(Organism& organism);
-  void updateOrganism(Organism& organism);
+  PreparedPhysiology preparePhysiology(const Organism& organism) const;
+  void updateOrganism(Organism& organism,size_t slot=SIZE_MAX);
   void eat(Organism& organism, CellType mouth, int x, int y);
   void produce(Organism& organism, int x, int y);
   void reproduce(Organism& parent);
@@ -131,7 +161,7 @@ class NativeSimulation {
   void die(Organism& organism, DeathCause cause);
   void processRespiratoryMortality();
   GenomeDescriptor describeGenome(const Organism& organism) const;
-  void classifySpecies();
+  void classifySpecies(bool useWorkers=true);
   void sampleEcology();
   void addEvolutionEvent(EvolutionEventType type,int speciesId,float value,const std::string& label);
   void attack(Organism& attacker, BodyCell& weapon, int x, int y);
@@ -141,6 +171,7 @@ class NativeSimulation {
   const Organism* organismById(int id) const;
   BodyCell* localCellAt(Organism& organism, int x, int y);
   bool isClear(const Organism& organism, int x, int y, int rotation) const;
+  bool isClearBody(std::span<const BodyCell> body,int id,int x,int y,int rotation) const;
   bool straightPath(int x1, int y1, int x2, int y2, const Organism& parent) const;
   void features(const Organism& organism,std::vector<uint16_t>& result) const;
   bool attemptMove(Organism& organism);
@@ -148,11 +179,16 @@ class NativeSimulation {
   void clearBody(const Organism& organism);
   void updateClimateCache();
   void updateAtmosphere();
+  void registerAtmosphere(const Organism& organism,int sign);
+  void rebuildAtmosphereCounts();
   void updateNutrients();
   void updateDrainage();
   void archiveState(struct StateArchive& archive);
   void pruneLineage();
 public:
+  void profileTicks(bool enabled){profileTicks_=enabled;}
+  void setParallelAnalysis(bool enabled){parallelAnalysis_=enabled;}
+  TickWork tickWork() const{return tickWork_;}
   WorldLayers world;
   FollowPreferences followPreferences;
   struct SavedView {float zoom{1},cameraX{},cameraY{};int overlay{},selectedOrganism{-1},fps{30},tps{60},atlasTab{},timelineWindow{600};bool weather{true},atlasOpen{},paused{};int tool{};uint32_t nextWorldSeed{2};bool habitatHistory{};} savedView;

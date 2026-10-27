@@ -36,6 +36,10 @@ add_custom_command(TARGET life_engine POST_BUILD
     $<TARGET_FILE:life_engine>
     $<TARGET_FILE_DIR:life_engine>/life_engine_skia_preview.exe)
 if(BUILD_TESTING)
+  add_executable(life_engine_optimization_tests tests/optimization_tests.cpp src/simulation.cpp src/atlas.cpp)
+  target_include_directories(life_engine_optimization_tests PRIVATE src)
+  target_compile_options(life_engine_optimization_tests PRIVATE -O2)
+  add_test(NAME native_optimization_contracts COMMAND life_engine_optimization_tests)
   add_executable(life_engine_frame_tests tests/frame_exchange_tests.cpp src/simulation.cpp src/atlas.cpp)
   target_include_directories(life_engine_frame_tests PRIVATE src)
   target_compile_options(life_engine_frame_tests PRIVATE -O2)

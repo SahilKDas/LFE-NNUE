@@ -1,0 +1,12 @@
+# Cold-resume stress: deliberately stop/export/restart every ten seconds.
+# Regular startup: no seeded population, synthetic family, lifecycle overrides or resource injection.
+resize 1920 1080
+exchange on
+frame 1
+export headless/regular-start.png
+play 10 headless/regular-first-10s.json
+export headless/regular-10s.png
+play 10 headless/regular-next-10s.json
+export headless/regular-20s.png
+play 10 headless/regular-dense-10s.json
+export headless/regular-30s.png

@@ -10,6 +10,7 @@
 #include "version.hpp"
 #include "raster_export.hpp"
 #include "frame_exchange.hpp"
+#include "frame_pacer.hpp"
 #include <fstream>
 #include <stdexcept>
 #include <algorithm>
@@ -60,6 +61,10 @@ public:
 std::unique_ptr<life::skia::Api> api;
 std::unique_ptr<RenderWorkers> renderWorkers;
 std::vector<uint32_t> pixels;
+bool exactRowCopy=true;
+std::vector<uint32_t> terrainBackground;
+std::vector<uint16_t> backgroundDirtyTiles;
+bool backgroundCopiedAll=true;
 std::vector<uint8_t> renderCells,renderTerrain,renderResources,renderElevation,renderHabitat;std::vector<uint16_t> renderNutrients;
 std::vector<int32_t> renderOwners;
 std::unordered_map<int,int> renderSpeciesByOwner;
@@ -133,6 +138,8 @@ std::atomic_bool persistenceBusy=false;
 constexpr UINT PersistenceMessage=WM_APP+2;
 struct PersistenceResult {bool loaded{},success{};std::string message;};
 bool scheduledPaint=false;
+std::atomic<std::chrono::steady_clock::duration::rep> requestedPresentationTime{0};
+std::chrono::steady_clock::time_point framePresentationDeadline{};
 std::atomic_bool presentationPending=false;
 std::atomic_uint64_t presentationDrops=0;
 bool uiBenchmark=false;
@@ -153,7 +160,7 @@ bool headlessMode=false;
 int headlessWidth=1920,headlessHeight=1080;
 double headlessFrameSeconds=-1;
 uint64_t watchPublishedRevision=0;
-struct FrameWork {double snapshot{},raster{},ui{};} lastFrameWork;
+struct FrameWork {double snapshot{},raster{},ui{},presentWait{};} lastFrameWork;
 RECT viewportBounds(HWND window){RECT bounds{};if(headlessMode){bounds.right=headlessWidth;bounds.bottom=headlessHeight;}else GetClientRect(window,&bounds);return bounds;}
 
 constexpr uint32_t terrainColors[] = {0xff2e4330, 0xff2b5b36, 0xff6c5232, 0xff1a3e5f, 0xff4d525a};
@@ -292,14 +299,16 @@ void render(HWND window, HDC dc) {
   const float aside = std::min(390.0f, width * .32f),contentRight=width-aside,headerHeight=82;
   const auto cameraNow=std::chrono::steady_clock::now();const double cameraSeconds=headlessFrameSeconds>=0?headlessFrameSeconds:std::chrono::duration<double>(cameraNow-previousCameraFrame).count();previousCameraFrame=cameraNow;
   if(followCamera.target==renderWatchedPose.id){followCamera.offsetX=cameraX;followCamera.offsetY=cameraY;followCamera.advance(renderWatchedPose.x,renderWatchedPose.y,renderWatchedPose.alive,zoom,contentRight,height-headerHeight,cameraSeconds,atlasOpen);if(followCamera.following){cameraX=float(followCamera.offsetX);cameraY=float(followCamera.offsetY);}}
-  rectangle(canvas,paint,0,0,contentRight,headerHeight,0xff416788);rectangle(canvas,paint,0,headerHeight,contentRight,float(height),0xff121d29);rectangle(canvas,paint,contentRight,0,float(width),float(height),0xff3a4b68);
+  rectangle(canvas,paint,0,0,contentRight,headerHeight,0xff416788);rectangle(canvas,paint,0,headerHeight,contentRight,float(height),0xff121d29);
   const bool wrappedView=followCamera.wrapped;const int worldStageTop=int(headerHeight);const float viewportCameraY=cameraY;const int stageLeft=wrappedView?0:std::max(0,int(std::floor(cameraX))),stageRight=wrappedView?int(contentRight):std::min(std::max(0,int(contentRight)),int(std::ceil(cameraX+life::WorldWidth*zoom))),stageTop=wrappedView?worldStageTop:std::max(worldStageTop,int(std::floor(worldStageTop+viewportCameraY))),stageBottom=wrappedView?height:std::min(height,int(std::ceil(worldStageTop+viewportCameraY+life::WorldHeight*zoom)));
 
   const auto rasterStart=std::chrono::steady_clock::now();
   prepareWorldPalette();rasterColumns.resize(width);rasterRows.resize(height);
   for(int x=stageLeft;x<stageRight;++x){int sample=int(std::floor((x-cameraX)/zoom));if(wrappedView)sample=life::wrapCoordinate(sample,life::WorldWidth);rasterColumns[x]=sample>=0&&sample<life::WorldWidth?sample:-1;}
   for(int y=stageTop;y<stageBottom;++y){int sample=int(std::floor((y-worldStageTop-viewportCameraY)/zoom));if(wrappedView)sample=life::wrapCoordinate(sample,life::WorldHeight);rasterRows[y]=sample>=0&&sample<life::WorldHeight?sample*life::WorldWidth:-1;}
-  constexpr int rasterPartitions=10;renderWorkers->run([&](int partition){for(int y=stageTop+partition;y<stageBottom;y+=rasterPartitions){const int row=rasterRows[y];if(row<0)continue;auto* destination=pixels.data()+size_t(y)*width;for(int x=stageLeft;x<stageRight;++x){const int column=rasterColumns[x];if(column<0)continue;const int index=row+column;uint32_t color=renderPalette[index];if(followCamera.target>=0&&familyHighlights&&renderFamilyEdges[index])color=familyOutline(color,index,x,y,(x-cameraX)/zoom,(y-worldStageTop-viewportCameraY)/zoom);destination[x]=color;}}});lastFrameWork.raster=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-rasterStart).count();const auto uiStart=std::chrono::steady_clock::now();
+  const int rasterWidth=stageRight-stageLeft;const bool directRows=exactRowCopy&&zoom==1&&!(followCamera.target>=0&&familyHighlights)&&rasterWidth>0&&rasterColumns[stageLeft]>=0&&rasterColumns[stageRight-1]-rasterColumns[stageLeft]==rasterWidth-1;
+  if(directRows){for(int y=stageTop;y<stageBottom;++y)if(rasterRows[y]>=0)std::copy_n(renderPalette.data()+rasterRows[y]+rasterColumns[stageLeft],rasterWidth,pixels.data()+size_t(y)*width+stageLeft);}
+  else {constexpr int rasterPartitions=10;renderWorkers->run([&](int partition){for(int y=stageTop+partition;y<stageBottom;y+=rasterPartitions){const int row=rasterRows[y];if(row<0)continue;auto* destination=pixels.data()+size_t(y)*width;for(int x=stageLeft;x<stageRight;++x){const int column=rasterColumns[x];if(column<0)continue;const int index=row+column;uint32_t color=renderPalette[index];if(followCamera.target>=0&&familyHighlights&&renderFamilyEdges[index])color=familyOutline(color,index,x,y,(x-cameraX)/zoom,(y-worldStageTop-viewportCameraY)/zoom);destination[x]=color;}}});}lastFrameWork.raster=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-rasterStart).count();const auto uiStart=std::chrono::steady_clock::now();
   if(weatherVisible&&stageRight>stageLeft&&stageBottom>stageTop){
     // Distant clouds drift slowly; their shadows sit below the rain planes.
     for(int cloud=0;cloud<5;++cloud){const int span=stageRight-stageLeft+240,cx=stageLeft-120+(cloud*271+metrics.ticks/3)%span,cy=stageTop+40+(cloud*83)%std::max(1,stageBottom-stageTop);for(int band=-4;band<=4;++band){const int half=95-band*band*4;const float left=float(std::clamp(cx-half,stageLeft,stageRight)),right=float(std::clamp(cx+half,stageLeft,stageRight)),top=float(std::clamp(cy+band*5,stageTop,stageBottom)),bottom=float(std::clamp(cy+band*5+5,stageTop,stageBottom));if(right>left&&bottom>top)rectangle(canvas,paint,left,top,right,bottom,band<0?0x0c06121e:0x107f98b0);}}
@@ -326,8 +335,9 @@ void render(HWND window, HDC dc) {
   rectangle(canvas,paint,24,float(height-52),320,float(height-20),0xee121d29);text(canvas,paint,"Terrain + resources + evolving organisms",38,float(height-31),11,0xffffffff);if(atlasOpen)renderAtlasView(canvas,paint,0,headerHeight,contentRight,float(height));
   rectangle(canvas,paint,20,float(height-28),103,float(height-4),0xff416788);text(canvas,paint,"Save (F5)",30,float(height-12),10,0xffffffff);rectangle(canvas,paint,109,float(height-28),192,float(height-4),0xff416788);text(canvas,paint,"Load (F9)",119,float(height-12),10,0xffffffff);text(canvas,paint,"W Weather · "+saveStatus,205,float(height-12),10,0xffb8c3d1);
   api->paintDelete(paint);api->surfaceUnref(surface);
-  if(!headlessMode)StretchDIBits(dc, 0, 0, width, height, 0, 0, width, height, pixels.data(), &bitmap, DIB_RGB_COLORS, SRCCOPY);
   lastFrameWork.ui=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-uiStart).count();
+  const auto beforePresent=std::chrono::steady_clock::now();if(framePresentationDeadline!=std::chrono::steady_clock::time_point{}){static thread_local life::FramePacer pacer(0);pacer.until(framePresentationDeadline);}lastFrameWork.presentWait=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-beforePresent).count();
+  if(!headlessMode)StretchDIBits(dc, 0, 0, width, height, 0, 0, width, height, pixels.data(), &bitmap, DIB_RGB_COLORS, SRCCOPY);
   ++measuredFrames;if(uiBenchmark){const auto frameNow=std::chrono::steady_clock::now();if(uiBenchmarkFrames)frameIntervalsMs.push_back(std::chrono::duration<double,std::milli>(frameNow-previousBenchmarkFrame).count());previousBenchmarkFrame=frameNow;++uiBenchmarkFrames;uiBenchmarkRenderMs+=std::chrono::duration<double,std::milli>(frameNow-renderStarted).count();if(pendingInput){inputLatenciesMs.push_back(std::chrono::duration<double,std::milli>(frameNow-*pendingInput).count());pendingInput.reset();}}
 }
 
@@ -337,7 +347,7 @@ void writeDetailedBenchmarkReport(){const auto now=std::chrono::steady_clock::no
 
 LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
   if (message == WM_PAINT) { PAINTSTRUCT paint{};HDC dc=BeginPaint(window,&paint);if(scheduledPaint){scheduledPaint=false;lastPresentedFrame=std::chrono::steady_clock::now();render(window,dc);}EndPaint(window,&paint);return 0; }
-  if (message == PresentMessage) {presentationPending.store(false);if(uiBenchmark&&std::chrono::duration<double>(std::chrono::steady_clock::now()-uiBenchmarkStart).count()>=uiBenchmarkSeconds){writeDetailedBenchmarkReport();DestroyWindow(window);return 0;}scheduledPaint=true;InvalidateRect(window,nullptr,FALSE);UpdateWindow(window);return 0; }
+  if (message == PresentMessage) {presentationPending.store(false);if(uiBenchmark&&std::chrono::duration<double>(std::chrono::steady_clock::now()-uiBenchmarkStart).count()>=uiBenchmarkSeconds){writeDetailedBenchmarkReport();DestroyWindow(window);return 0;}framePresentationDeadline=std::chrono::steady_clock::time_point(std::chrono::steady_clock::duration(requestedPresentationTime.load()));scheduledPaint=true;InvalidateRect(window,nullptr,FALSE);UpdateWindow(window);return 0; }
   if (message == WM_SIZE) { InvalidateRect(window, nullptr, FALSE); return 0; }
   if(message==WM_KEYDOWN&&wParam=='F'){toggleFollowing(window);return 0;}
   if(message==WM_KEYDOWN&&wParam=='G'){familyHighlights=!familyHighlights;return 0;}
@@ -399,6 +409,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wParam, LPARAM lPar
 LONG WINAPI reportCrash(EXCEPTION_POINTERS* details){std::ostringstream message;message<<"unhandled exception code=0x"<<std::hex<<(details&&details->ExceptionRecord?details->ExceptionRecord->ExceptionCode:0)<<" address="<<(details&&details->ExceptionRecord?details->ExceptionRecord->ExceptionAddress:nullptr);life::logMessage(message.str());return EXCEPTION_EXECUTE_HANDLER;}
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR commandLine, int show) {
+  life::FramePacer::preferFastCore(0);
   const std::wstring arguments=commandLine?commandLine:L"";headlessMode=arguments.find(L"--headless-script")!=std::wstring::npos;
   if(headlessMode)SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX|SEM_NOOPENFILEERRORBOX);
   if(!headlessMode){life::initializeLog();SetUnhandledExceptionFilter(reportCrash);appSettings=life::loadSettings();requestedTps.store(appSettings.requestedTps);requestedFps.store(appSettings.requestedFps);activeOverlay=Overlay(appSettings.overlay);}
@@ -422,8 +433,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR commandLine, int show)
   timeBeginPeriod(1);
   if(uiBenchmark){uiBenchmarkStart=nextBenchmarkInput=measurementStart=lastRenderRequest=previousBenchmarkFrame=std::chrono::steady_clock::now();uiBenchmarkTicks.store(0);uiBenchmarkFrames=uiBenchmarkInputs=measuredFrames=0;uiBenchmarkRenderMs=0;presentationDrops.store(0);inputLatenciesMs.clear();frameIntervalsMs.clear();pendingInput.reset();}
   presentationEnabled=true;invalidatePresentation();for(int frame=0;frame<3;++frame)publishSimulationFrame(true);
-  simulationThread=std::jthread([](std::stop_token stop){auto next=std::chrono::steady_clock::now();while(!stop.stop_requested()){if(paused.load()){next=std::chrono::steady_clock::now();{std::unique_lock lock(simulationMutex,std::try_to_lock);if(lock.owns_lock())publishSimulationFrame();}std::this_thread::sleep_for(std::chrono::milliseconds(2));continue;}const int target=std::max(1,requestedTps.load());const auto interval=std::chrono::duration<double>(1.0/target);const auto now=std::chrono::steady_clock::now();if(now<next){std::this_thread::sleep_until(next);continue;}{std::unique_lock lock(simulationMutex);simulation.step();publishSimulationFrame();}measuredTicks.fetch_add(1);if(uiBenchmark)uiBenchmarkTicks.fetch_add(1);next+=std::chrono::duration_cast<std::chrono::steady_clock::duration>(interval);if(std::chrono::steady_clock::now()-next>std::chrono::milliseconds(250))next=std::chrono::steady_clock::now();}});
-  presentationThread=std::jthread([window](std::stop_token stop){auto next=std::chrono::steady_clock::now();while(!stop.stop_requested()){const int target=std::clamp(requestedFps.load(),30,360);next+=std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(1.0/target));if(!presentationPending.exchange(true))PostMessageW(window,PresentMessage,0,0);else presentationDrops.fetch_add(1);std::this_thread::sleep_until(next);if(std::chrono::steady_clock::now()-next>std::chrono::milliseconds(100))next=std::chrono::steady_clock::now();}});
+  simulationThread=std::jthread([](std::stop_token stop){life::FramePacer pacer(1);auto next=std::chrono::steady_clock::now();while(!stop.stop_requested()){if(paused.load()){next=std::chrono::steady_clock::now();{std::unique_lock lock(simulationMutex,std::try_to_lock);if(lock.owns_lock())publishSimulationFrame();}std::this_thread::sleep_for(std::chrono::milliseconds(2));continue;}const int target=std::max(1,requestedTps.load());const auto interval=std::chrono::duration<double>(1.0/target);const auto now=std::chrono::steady_clock::now();if(now<next){pacer.until(next);continue;}{std::unique_lock lock(simulationMutex);simulation.step();publishSimulationFrame();}measuredTicks.fetch_add(1);if(uiBenchmark)uiBenchmarkTicks.fetch_add(1);next+=std::chrono::duration_cast<std::chrono::steady_clock::duration>(interval);if(std::chrono::steady_clock::now()-next>std::chrono::milliseconds(250))next=std::chrono::steady_clock::now();}});
+  presentationThread=std::jthread([window](std::stop_token stop){life::FramePacer pacer(1);auto next=std::chrono::steady_clock::now();while(!stop.stop_requested()){const int target=std::clamp(requestedFps.load(),30,360);next+=std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(1.0/target));if(!presentationPending.exchange(true)){requestedPresentationTime=next.time_since_epoch().count();PostMessageW(window,PresentMessage,0,0);}else presentationDrops.fetch_add(1);pacer.until(next);if(std::chrono::steady_clock::now()-next>std::chrono::milliseconds(100))next=std::chrono::steady_clock::now();}});
   SetTimer(window, 1, 50, nullptr);
   MSG message{}; while (GetMessageW(&message, nullptr, 0, 0) > 0) { TranslateMessage(&message); DispatchMessageW(&message); }
   simulationThread.request_stop();presentationThread.request_stop();simulationThread.join();presentationThread.join();presentationEnabled=false;renderWorkers.reset();timeEndPeriod(1);

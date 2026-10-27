@@ -1,47 +1,52 @@
-# Follow-camera performance validation
+# Regular-game performance validation
 
-The completed-frame exchange removes the normal world renderer's dependency on
-the simulation read lock. Three reusable buffers carry layer-specific dirty
-versions; adjacent tile copies are merged into horizontal runs. Diagnostics
-refresh at most ten times per second. Family boundaries invalidate on ownership
-or family-membership changes, and a bounded text cache preserves exact glyphs.
+The regular startup game has its own headless test. It starts with the normal
+founder and runs plants, reproduction, mutation and mortality unchanged. It does
+not seed a benchmark population, inject resources, or disable lifecycle rules.
+One uninterrupted thirty-second run reports three ten-second windows using the
+native Skia renderer at 1920×1080 and a requested 60 TPS/FPS.
 
-All five native CTest suites pass, including concurrent frame publication,
-held-frame protection, reset epochs, layer invalidation, captured decisions,
-pixel-coherent rendering caches, replay, save/load, and reference parity.
+## Measured October 27, 2026
 
-## Measurements
+Raw results: [regular-game-2026-10-27.json](benchmarks/results/regular-game-2026-10-27.json).
 
-Measured on this development laptop using headless Skia rasterization, with
-10,000 initial diverse organisms, active ecology, and a large highlighted family.
-These measure offscreen rendering and scripted command latency, not physical
-display presentation or desktop input. The user's existing application was left
-untouched. Results depend on concurrent laptop workload.
+| Window | TPS | Render FPS | Distinct displayed ticks/s | Frame p99 | Longest visible-tick gap |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 0–10 s | 59.9 | 59.9 | 58.3 | 17.218 ms | 33.801 ms |
+| 10–20 s | 60.0 | 60.0 | 57.6 | 17.175 ms | 33.712 ms |
+| 20–30 s | 60.0 | 60.0 | 59.0 | 17.219 ms | 50.067 ms |
 
-An eight-second comparison using the same scenario measured:
+Population rose naturally from one founder to 31,128 and finished at 11,595.
+There were 35,918 births. The report's deaths field currently counts retained
+dead lineage records, not total mortality; it reaches the 20,000 retention limit.
+The overall 1% frame low was 58.115 FPS; no frame interval exceeded 20 ms.
+The slowest simulation tick took 37.748 ms at tick 1200. Its classification work
+took 25.316 ms and overlapped independent environment work. Overlapping phase
+durations must not be added together.
 
-| Measurement | Live-state lock path | Completed-frame exchange |
-| --- | ---: | ---: |
-| Simulation TPS | 59.27 | 59.46 |
-| Render FPS | 59.39 | 59.59 |
-| Distinct simulation ticks displayed/second | 20.99 | 43.61 |
-| Snapshot p95 (ms) | 7.95 | 3.48 |
-| Command-to-frame p95 (ms) | 22.62 | 13.22 |
+**The strict acceptance gate still fails.** Smooth raster pacing does not mean
+that each frame contains a new simulation state. The middle window misses the
+distinct-tick threshold, and the final window contains a 50 ms world-update gap.
+These failures remain visible instead of claiming success from average counters.
 
-The 60-second follow scenario measured 53.95 TPS, 60.00 render FPS,
-42.47 distinct displayed ticks/second, 33.85 ms p99 frame interval
-(29.54 FPS 1% low), and 14.61 ms p95 command-to-frame latency.
-The population changed naturally during this run; it is not a sustained fixed
-10,000-population throughput test. A short regression build/test run overlapped
-part of this measurement, so it is also not an isolated machine result.
+These measurements use offscreen rendering; physical monitor presentation and
+desktop-input latency are unmeasured. No existing application window was
+controlled. The regular-game test reports interaction latency as untested.
 
-**The strict performance acceptance gate remains unmet.** In particular, average
-render FPS does not establish smooth frame pacing, and repeated rendering of
-one completed state does not establish simulation progress. Reports retain
-separate `render_fps`, `snapshot_fps`, and `unique_tick_fps` measurements and do
-not relax the 58 TPS / 55 FPS / 45 FPS 1% low thresholds.
+## Changes under test
 
-Reproduce with `native/tests/follow_performance.commands`, described in
-[HEADLESS.md](HEADLESS.md). `benchmark-sync` permits direct comparison with the
-old lock-based handoff. Keep builds and other benchmark processes idle for an
-isolated comparison.
+Three helpers share independent analysis jobs. Coarse environment work overlaps
+classification. Distance-equivalent species searches, atmosphere totals, direct
+owner slots, reusable pruning buffers, sparse neural mutation plans, deferred
+brain creation and runtime-selected AVX2 inference reduce repeated work. Scalar
+inference remains the reference; interactions and random draws stay serial.
+
+Rendering retains exact cell colors, caches terrain backgrounds, and uses an
+exact one-pixel row-copy path. Completed immutable snapshots are presented at
+paced deadlines. Telemetry separates frames, snapshots and distinct ticks.
+High-resolution waits do not busy-spin or change the laptop's power plan.
+
+Reproduce with native/tests/regular_game_performance.commands, described in
+[HEADLESS.md](HEADLESS.md). Keep builds and other tests idle during measurement.
+The separate restart script tests cold resumes; the diverse-population follow
+benchmark remains available separately.

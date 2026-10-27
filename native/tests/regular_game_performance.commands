@@ -1,0 +1,8 @@
+# The regular game runs continuously. Report each ten-second window separately.
+# No synthetic population, family, resource injection or lifecycle overrides.
+resize 1920 1080
+exchange on
+frame 1
+export headless/regular-start.png
+play 30 headless/regular-continuous.json
+export headless/regular-30s.png

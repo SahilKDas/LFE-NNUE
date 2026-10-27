@@ -1,5 +1,7 @@
 # Runs the actual native renderer without creating a window or sending desktop input.
 resize 1920 1080
+frame
+assert raster-coherent
 seed 1000
 select family
 follow
