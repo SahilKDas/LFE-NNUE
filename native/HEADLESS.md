@@ -30,6 +30,7 @@ Use one command per line; lines starting with `#` are comments. Paths can be quo
 | `follow` / `release` | Use the same camera start/release controls as the app. |
 | `descendant` | After death, follow the oldest living direct child, otherwise the oldest living descendant; ID breaks ties. |
 | `family on/off`, `compact on/off`, `atlas on/off`, `weather on/off` | Change local view controls. |
+| `exchange on/off` | Exercise the production three-buffer frame handoff during scripted, non-realtime checks. `benchmark` enables it. |
 | `zoom Z` / `pan DX DY` | Set zoom (0.2–12), or pan in screen pixels and release following. |
 | `overlay NAME` | Choose terrain, resources, productivity, climate, species, nutrients, decomposition, or habitat. |
 | `resize W H` | Set the offscreen viewport, within the app's supported desktop size range. |
@@ -43,9 +44,12 @@ Use one command per line; lines starting with `#` are comments. Paths can be quo
 | `state PATH.json` | Export camera, population, family counts, death cause, captured decision pose/tick, exact feature IDs, and neural outputs. |
 | `mark-camera` | Record camera offsets for a later hold assertion. |
 | `benchmark SECONDS PATH.json` | Run concurrent simulation and offscreen rendering, targeting 60 TPS/FPS for 1–120 seconds; report frame percentiles and command-to-frame latency. |
+| `benchmark-sync SECONDS PATH.json` | Run the same workload through the legacy live-state read-lock path for comparison. |
 
-Assertions: `assert following on/off`, `alive on/off`, `wrapped on/off`, `compact on/off`, `target ID/family`, `decisions-min N`, `family-min N`, `camera-held`, `snapshot-coherent`, and `palette-coherent`. Prefix each property with `assert`. The palette check verifies dirty-tile cache invalidation against the current world layers and overlay.
+Assertions: `assert following on/off`, `alive on/off`, `wrapped on/off`, `compact on/off`, `target ID/family`, `decisions-min N`, `family-min N`, `camera-held`, `snapshot-coherent`, `palette-coherent`, `family-pixels-coherent`, `family-edges-coherent`, and `text-cache-coherent`. Prefix each property with `assert`. These checks cover exact captured decisions, dirty-tile and family-mask invalidation, and pixel-identical cached versus uncached text rendering.
 
 The checked-in smoke script covers save/load, camera release, Atlas suspension, responsive layout, exact captured decisions, death holding, and descendant continuation. `follow_performance.commands` starts with 10,000 diverse organisms and keeps reproduction, mortality, mutation, terrain, resources, and climate active while highlighting a large family. Population may change naturally; the report includes initial, minimum, and final population. Throughput, smoothness, and interaction results are reported separately, retaining the 58 TPS, 55 FPS, 45 FPS 1% low, and under-100 ms latency targets. Its benchmark reports offscreen raster performance; it does not claim to measure monitor presentation or physical desktop-input latency.
 
-Headless tests use their own process and working-directory files. Running their benchmark at below-normal process priority is recommended when the laptop is being used for other work. The suite never closes or controls an already-running Life Engine window.
+The frame handoff has exactly three reusable buffers. Rendering consumes completed ticks and never needs the live physics read lock; old queued frames can be replaced rather than accumulating a backlog. The benchmark separately reports `render_fps`, `snapshot_fps`, and `unique_tick_fps` so drawing an unchanged frame cannot masquerade as visible simulation progress. Fonts and text blobs are bounded caches; pixel-coherence assertions preserve the original typography.
+
+Headless tests use their own process and working-directory files. Below-normal process priority is useful when sharing the laptop, but its scheduling delays should not be mistaken for an isolated normal-priority throughput measurement. The suite never closes or controls an already-running Life Engine window.

@@ -36,6 +36,10 @@ add_custom_command(TARGET life_engine POST_BUILD
     $<TARGET_FILE:life_engine>
     $<TARGET_FILE_DIR:life_engine>/life_engine_skia_preview.exe)
 if(BUILD_TESTING)
+  add_executable(life_engine_frame_tests tests/frame_exchange_tests.cpp src/simulation.cpp src/atlas.cpp)
+  target_include_directories(life_engine_frame_tests PRIVATE src)
+  target_compile_options(life_engine_frame_tests PRIVATE -O2)
+  add_test(NAME native_frame_exchange COMMAND life_engine_frame_tests)
   add_test(NAME native_follow_headless COMMAND life_engine "--headless-script=${CMAKE_CURRENT_SOURCE_DIR}/tests/follow_smoke.commands")
   set_tests_properties(native_follow_headless PROPERTIES TIMEOUT 90)
   add_executable(life_engine_watch_tests tests/watch_tests.cpp src/simulation.cpp src/atlas.cpp)

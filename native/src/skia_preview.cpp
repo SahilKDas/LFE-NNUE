@@ -9,6 +9,7 @@
 #include "skia_api.hpp"
 #include "version.hpp"
 #include "raster_export.hpp"
+#include "frame_exchange.hpp"
 #include <fstream>
 #include <stdexcept>
 #include <algorithm>
@@ -34,11 +35,26 @@
 namespace {
 class RenderWorkers {
   static constexpr int WorkerCount=4;
-  std::mutex mutex_;std::condition_variable wake_,finished_;std::vector<std::jthread> threads_;std::function<void(int)> task_;uint64_t generation_{};int remaining_{};
+  struct Dispatch {
+    std::function<void(int)> task;std::atomic_int next{0},remaining{0};std::mutex mutex;std::condition_variable finished;std::exception_ptr error;
+    void run(){for(int partition=next.fetch_add(1,std::memory_order_relaxed);partition<10;partition=next.fetch_add(1,std::memory_order_relaxed)){
+      try{task(partition);}catch(...){std::lock_guard lock(mutex);if(!error)error=std::current_exception();}
+      if(remaining.fetch_sub(1,std::memory_order_acq_rel)==1){std::lock_guard lock(mutex);finished.notify_one();}
+    }}
+  };
+  std::mutex mutex_;std::condition_variable wake_;std::array<std::shared_ptr<Dispatch>,8> dispatches_;std::vector<std::jthread> threads_;std::shared_ptr<Dispatch> current_;uint64_t generation_{};
 public:
-  RenderWorkers(){threads_.reserve(WorkerCount);for(int index=0;index<WorkerCount;++index)threads_.emplace_back([this,index](std::stop_token stop){uint64_t observed=0;for(;;){std::unique_lock lock(mutex_);wake_.wait(lock,[&]{return stop.stop_requested()||generation_!=observed;});if(stop.stop_requested())return;observed=generation_;auto task=task_;lock.unlock();task(index);lock.lock();if(--remaining_==0)finished_.notify_one();}});}
-  ~RenderWorkers(){for(auto& thread:threads_)thread.request_stop();wake_.notify_all();}
-  void run(const std::function<void(int)>& task){std::atomic_int next{0};const auto batch=[&](int){for(int partition=next.fetch_add(1);partition<10;partition=next.fetch_add(1))task(partition);};{std::lock_guard lock(mutex_);task_=batch;remaining_=WorkerCount;++generation_;}wake_.notify_all();batch(-1);std::unique_lock lock(mutex_);finished_.wait(lock,[&]{return remaining_==0;});task_={};}
+  RenderWorkers(){
+    for(auto& dispatch:dispatches_)dispatch=std::make_shared<Dispatch>();threads_.reserve(WorkerCount);
+    for(int index=0;index<WorkerCount;++index)threads_.emplace_back([this](std::stop_token stop){uint64_t observed=0;for(;;){std::unique_lock lock(mutex_);wake_.wait(lock,[&]{return stop.stop_requested()||generation_!=observed;});if(stop.stop_requested())return;observed=generation_;auto dispatch=current_;lock.unlock();dispatch->run();}});
+  }
+  ~RenderWorkers(){for(auto& thread:threads_)thread.request_stop();wake_.notify_all();for(auto& thread:threads_)thread.join();}
+  void run(const std::function<void(int)>& task){
+    const auto available=std::find_if(dispatches_.begin(),dispatches_.end(),[](const auto& dispatch){return dispatch.use_count()==1;});if(available==dispatches_.end())throw std::runtime_error("Raster dispatch pool exhausted");
+    auto dispatch=*available;dispatch->task=task;dispatch->next=0;dispatch->remaining=10;dispatch->error=nullptr;
+    {std::lock_guard lock(mutex_);current_=dispatch;++generation_;}wake_.notify_all();dispatch->run();
+    std::unique_lock lock(dispatch->mutex);dispatch->finished.wait(lock,[&]{return dispatch->remaining.load(std::memory_order_acquire)==0;});if(dispatch->error)std::rethrow_exception(dispatch->error);
+  }
 };
 
 std::unique_ptr<life::skia::Api> api;
@@ -69,6 +85,19 @@ std::vector<uint8_t> renderFamilyEdges;
 std::vector<uint32_t> renderPalette;
 std::vector<int> rasterColumns,rasterRows;
 std::vector<uint16_t> frameDirtyTiles;
+std::vector<uint16_t> familyOwnerDirtyTiles;
+int renderFamilyRoot=-1;
+std::vector<uint16_t> renderResourceAmounts;
+life::FrameExchange frameExchange(life::WorldWidth,life::WorldHeight);
+std::atomic_bool presentationEnabled=false;
+std::atomic_int presentationRoot=-1;
+std::atomic_size_t presentationHistory=0;
+std::atomic_uint64_t presentationContext=0;
+uint64_t renderFrameEpoch=0;
+std::array<std::vector<uint32_t>,4> renderLayerVersions;
+std::shared_ptr<const life::FrameDiagnostics> renderFrameDiagnostics;
+void publishSimulationFrame(bool force=false);
+void invalidatePresentation();
 bool frameCopiedAll=false;
 auto nextWatchDiagnostics=std::chrono::steady_clock::time_point{};
 auto previousCameraFrame=std::chrono::steady_clock::now();
@@ -186,7 +215,7 @@ void rectangle(life::skia::Api::Canvas canvas, life::skia::Api::Paint paint,
   api->canvasDrawRect(canvas, &rect, paint);
 }
 
-void text(life::skia::Api::Canvas canvas,life::skia::Api::Paint paint,const std::string& value,float x,float y,float size,uint32_t color,bool bold=false){auto font=api->fontNew(bold?boldTypeface:regularTypeface,size,1,0);const int count=api->fontTextToGlyphs(font,value.data(),value.size(),0,nullptr,0);if(count>0){std::vector<uint16_t> glyphs(count);api->fontTextToGlyphs(font,value.data(),value.size(),0,glyphs.data(),count);auto builder=api->textBlobBuilderNew();life::skia::RunBuffer run{};api->textBlobBuilderAllocRun(builder,font,count,0,0,nullptr,&run);std::memcpy(run.glyphs,glyphs.data(),glyphs.size()*sizeof(uint16_t));auto blob=api->textBlobBuilderMake(builder);api->paintSetColor(paint,color);api->paintSetAntialias(paint,true);api->canvasDrawTextBlob(canvas,blob,x,y,paint);api->textBlobUnref(blob);api->textBlobBuilderDelete(builder);}api->fontDelete(font);}
+#include "text_cache.inc"
 
 std::string lineageIds(const std::vector<life::LineageSummary>& records,size_t limit=5){std::ostringstream value;if(records.empty())return "None";for(size_t index=0;index<std::min(limit,records.size());++index){if(index)value<<", ";value<<'#'<<records[index].id<<(records[index].alive?"":"†");}if(records.size()>limit)value<<" +"<<(records.size()-limit);return value.str();}
 std::string featureIds(const std::vector<uint16_t>& features,size_t limit=9){std::ostringstream value;if(features.empty())return "None";for(size_t index=0;index<std::min(limit,features.size());++index){if(index)value<<", ";value<<features[index];}if(features.size()>limit)value<<" +"<<(features.size()-limit);return value.str();}
@@ -196,12 +225,12 @@ std::pair<int,int> screenToWorld(int screenX, int screenY) {
   if(followCamera.wrapped){x=life::wrapCoordinate(x,life::WorldWidth);y=life::wrapCoordinate(y,life::WorldHeight);}return {x,y};
 }
 
-void clearFollowing(bool clearWrap=false){const bool wrapped=followCamera.wrapped;followCamera.clear();followCamera.wrapped=clearWrap?false:wrapped;renderWatched={};renderWatchedPose={};renderFamily.clear();std::fill(renderFamilyCells.begin(),renderFamilyCells.end(),0);std::fill(renderFamilyEdges.begin(),renderFamilyEdges.end(),0);watchedHistoryOffset=0;nextWatchDiagnostics={};}
+void clearFollowing(bool clearWrap=false){const bool wrapped=followCamera.wrapped;followCamera.clear();followCamera.wrapped=clearWrap?false:wrapped;renderWatched={};renderWatchedPose={};renderFamily.clear();renderFamilyRoot=-1;std::fill(renderFamilyCells.begin(),renderFamilyCells.end(),0);std::fill(renderFamilyEdges.begin(),renderFamilyEdges.end(),0);watchedHistoryOffset=0;nextWatchDiagnostics={};renderFrameDiagnostics.reset();++presentationContext;}
 void toggleFollowing(HWND window){
   if(persistenceBusy.load()||selectedId<0)return;
   if(followCamera.following&&followCamera.target==selectedId){followCamera.release();return;}
   std::unique_lock lock(simulationMutex);simulation.watch(selectedId);const auto pose=simulation.watchedPose();if(pose.id<0||!pose.alive)return;
-  const RECT client=viewportBounds(window);const double aside=std::min(390.0,client.right*.32);followCamera.begin(selectedId,pose.x,pose.y,cameraX,cameraY,zoom,client.right-aside,client.bottom-82);watchedHistoryOffset=0;nextWatchDiagnostics={};
+  const RECT client=viewportBounds(window);const double aside=std::min(390.0,client.right*.32);followCamera.begin(selectedId,pose.x,pose.y,cameraX,cameraY,zoom,client.right-aside,client.bottom-82);watchedHistoryOffset=0;nextWatchDiagnostics={};presentationRoot=selectedId;presentationHistory=0;publishSimulationFrame(true);
 }
 void followDescendant(HWND window){
   if(persistenceBusy.load()||renderWatched.nextDescendant<0)return;
@@ -227,6 +256,7 @@ void applyTool(int screenX, int screenY) {
     case Tool::Bridge: simulation.paintHabitat(x,y,life::HabitatType::Bridge); break;
     case Tool::Pan: break;
   }
+  publishSimulationFrame(true);
 }
 
 void renderAtlasView(life::skia::Api::Canvas canvas,life::skia::Api::Paint paint,float left,float top,float right,float bottom){
@@ -317,7 +347,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wParam, LPARAM lPar
   if(message==WM_KEYDOWN&&wParam=='H'){habitatHistory=!habitatHistory;return 0;}
   if(message==WM_KEYDOWN&&wParam=='W'){weatherVisible=!weatherVisible;return 0;}
   if(message==PersistenceMessage){std::unique_ptr<PersistenceResult> result(reinterpret_cast<PersistenceResult*>(lParam));saveStatus=result->message;if(result->loaded&&result->success){{std::shared_lock lock(simulationMutex);const auto view=simulation.savedView;zoom=std::clamp(view.zoom,.2f,12.f);cameraX=view.cameraX;cameraY=view.cameraY;activeOverlay=Overlay(std::clamp(view.overlay,0,7));selectedId=view.selectedOrganism;weatherVisible=view.weather;atlasOpen=view.atlasOpen;atlasTab=std::clamp(view.atlasTab,0,3);atlasTimelineWindow=std::clamp(view.timelineWindow,120,24000);requestedFps=std::clamp(view.fps/30,1,12)*30;requestedTps=std::clamp(view.tps,1,120);paused=view.paused;activeTool=Tool(std::clamp(view.tool,0,11));nextWorldSeed=view.nextWorldSeed;habitatHistory=view.habitatHistory;clearFollowing(true);const auto preferences=simulation.followPreferences;familyHighlights=preferences.family;compactFollow=preferences.compact;followCamera.target=preferences.target;followCamera.wrapped=preferences.wrapped;followCamera.following=preferences.enabled;const auto pose=simulation.watchedPose();RECT bounds{};GetClientRect(window,&bounds);followCamera.anchorX=life::nearestWrapped(pose.x,(bounds.right-std::min(390.,bounds.right*.32))*.5/zoom-cameraX/zoom,life::WorldWidth);followCamera.anchorY=life::nearestWrapped(pose.y,(bounds.bottom-82)*.5/zoom-cameraY/zoom,life::WorldHeight);}renderDirtyVersions.clear();renderAtlasRevision=UINT64_MAX;measuredTicks=0;}persistenceBusy=false;InvalidateRect(window,nullptr,FALSE);return 0;}
-  if(message==WM_KEYDOWN&&(wParam==VK_F5||wParam==VK_F9)){if(persistenceBusy.exchange(true))return 0;const bool loading=wParam==VK_F9;auto savePath=life::appDataDirectory()/"world.lfesave";if(GetKeyState(VK_SHIFT)<0){wchar_t filename[32768]{};OPENFILENAMEW dialog{};dialog.lStructSize=sizeof(dialog);dialog.hwndOwner=window;dialog.lpstrFile=filename;dialog.nMaxFile=32768;dialog.lpstrFilter=L"Life Engine world (*.lfesave)\0*.lfesave\0\0";dialog.lpstrDefExt=L"lfesave";dialog.Flags=OFN_NOCHANGEDIR|OFN_PATHMUSTEXIST|(loading?OFN_FILEMUSTEXIST:OFN_OVERWRITEPROMPT);if(!(loading?GetOpenFileNameW(&dialog):GetSaveFileNameW(&dialog))){persistenceBusy=false;return 0;}savePath=filename;}const life::NativeSimulation::SavedView view{zoom,cameraX,cameraY,int(activeOverlay),selectedId,requestedFps.load(),requestedTps.load(),atlasTab,atlasTimelineWindow,weatherVisible,atlasOpen,paused.load(),int(activeTool),nextWorldSeed,habitatHistory};const life::FollowPreferences preferences{followCamera.target,followCamera.following,familyHighlights,compactFollow,followCamera.wrapped};saveStatus=loading?"Loading world...":"Saving world...";persistenceThread=std::jthread([window,loading,view,savePath,preferences]{auto result=std::make_unique<PersistenceResult>();result->loaded=loading;try{std::unique_lock lock(simulationMutex);const auto path=savePath;std::filesystem::create_directories(path.parent_path());if(loading)simulation.load(path);else{simulation.savedView=view;simulation.followPreferences=preferences;simulation.save(path);}result->success=true;result->message=loading?"World loaded":"World saved";}catch(const std::exception& error){result->message=error.what();life::logMessage(result->message);}if(PostMessageW(window,PersistenceMessage,0,reinterpret_cast<LPARAM>(result.get())))result.release();});return 0;}
+  if(message==WM_KEYDOWN&&(wParam==VK_F5||wParam==VK_F9)){if(persistenceBusy.exchange(true))return 0;const bool loading=wParam==VK_F9;auto savePath=life::appDataDirectory()/"world.lfesave";if(GetKeyState(VK_SHIFT)<0){wchar_t filename[32768]{};OPENFILENAMEW dialog{};dialog.lStructSize=sizeof(dialog);dialog.hwndOwner=window;dialog.lpstrFile=filename;dialog.nMaxFile=32768;dialog.lpstrFilter=L"Life Engine world (*.lfesave)\0*.lfesave\0\0";dialog.lpstrDefExt=L"lfesave";dialog.Flags=OFN_NOCHANGEDIR|OFN_PATHMUSTEXIST|(loading?OFN_FILEMUSTEXIST:OFN_OVERWRITEPROMPT);if(!(loading?GetOpenFileNameW(&dialog):GetSaveFileNameW(&dialog))){persistenceBusy=false;return 0;}savePath=filename;}const life::NativeSimulation::SavedView view{zoom,cameraX,cameraY,int(activeOverlay),selectedId,requestedFps.load(),requestedTps.load(),atlasTab,atlasTimelineWindow,weatherVisible,atlasOpen,paused.load(),int(activeTool),nextWorldSeed,habitatHistory};const life::FollowPreferences preferences{followCamera.target,followCamera.following,familyHighlights,compactFollow,followCamera.wrapped};saveStatus=loading?"Loading world...":"Saving world...";persistenceThread=std::jthread([window,loading,view,savePath,preferences]{auto result=std::make_unique<PersistenceResult>();result->loaded=loading;try{std::unique_lock lock(simulationMutex);const auto path=savePath;std::filesystem::create_directories(path.parent_path());if(loading){simulation.load(path);invalidatePresentation();publishSimulationFrame(true);}else{simulation.savedView=view;simulation.followPreferences=preferences;simulation.save(path);}result->success=true;result->message=loading?"World loaded":"World saved";}catch(const std::exception& error){result->message=error.what();life::logMessage(result->message);}if(PostMessageW(window,PersistenceMessage,0,reinterpret_cast<LPARAM>(result.get())))result.release();});return 0;}
   if(message==WM_KEYDOWN&&(wParam=='A'||wParam=='a')){atlasOpen=!atlasOpen;InvalidateRect(window,nullptr,FALSE);return 0;}
   if (message == WM_TIMER) {
     const auto now=std::chrono::steady_clock::now();
@@ -331,16 +361,16 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wParam, LPARAM lPar
     const int mouseX=GET_X_LPARAM(lParam),mouseY=GET_Y_LPARAM(lParam);RECT client{};GetClientRect(window,&client);const float aside=std::min(390.0f,client.right*.32f),contentRight=client.right-aside,panelX=contentRight+15,panelRight=client.right-15;
     if(message==WM_LBUTTONDOWN&&mouseY>=632&&mouseY<=656&&mouseX>=panelRight-86&&mouseX<=panelRight-20){toggleFollowing(window);return 0;}
     if(message==WM_LBUTTONDOWN&&!atlasOpen&&followCamera.target>=0&&life::FollowHudLayout(contentRight,compactFollow).contains(float(mouseX),float(mouseY)))return 0;
-    if(message==WM_LBUTTONDOWN&&atlasOpen&&mouseX<contentRight&&mouseY>=150){const float tabWidth=(contentRight-48)/4.0f;if(mouseY<=182){atlasTab=std::clamp(int((mouseX-24)/tabWidth),0,3);}else if(atlasTab==1&&mouseY>=212&&!persistenceBusy.load()){const int row=(mouseY-212)/22;if(row>=0&&row<int(renderAtlas.species.size())){const auto species=renderAtlas.species[size_t(row)];std::unique_lock lock(simulationMutex);simulation.selectSpecies(species.id);selectedId=species.representativeId;simulation.select(selectedId);simulation.watch(selectedId);clearFollowing();}}InvalidateRect(window,nullptr,FALSE);return 0;}
+    if(message==WM_LBUTTONDOWN&&atlasOpen&&mouseX<contentRight&&mouseY>=150){const float tabWidth=(contentRight-48)/4.0f;if(mouseY<=182){atlasTab=std::clamp(int((mouseX-24)/tabWidth),0,3);}else if(atlasTab==1&&mouseY>=212&&!persistenceBusy.load()){const int row=(mouseY-212)/22;if(row>=0&&row<int(renderAtlas.species.size())){const auto species=renderAtlas.species[size_t(row)];std::unique_lock lock(simulationMutex);simulation.selectSpecies(species.id);selectedId=species.representativeId;simulation.select(selectedId);simulation.watch(selectedId);clearFollowing();publishSimulationFrame(true);}}InvalidateRect(window,nullptr,FALSE);return 0;}
     if(message==WM_LBUTTONDOWN&&mouseY>=25&&mouseY<=58&&mouseX>=contentRight-210&&mouseX<=contentRight-116){atlasOpen=!atlasOpen;InvalidateRect(window,nullptr,FALSE);return 0;}
     if(message==WM_LBUTTONDOWN&&mouseX>=contentRight){
       if(mouseY>=194&&mouseY<=227&&mouseX>=panelRight-77&&mouseX<=panelRight-20){paused.store(!paused.load());}
       else if(mouseY>=269&&mouseY<=288&&mouseX>=panelX+20&&mouseX<=panelRight-20){requestedTps.store(std::clamp(1+int((mouseX-(panelX+20))*119/std::max(1.0f,panelRight-panelX-40)),1,120));}
       else if(mouseY>=287&&mouseY<331){const float fpsLeft=panelX+53,fpsGap=3,fpsWidth=(panelRight-fpsLeft-20-fpsGap*5)/6;const int row=(mouseY-287)/24,column=int((mouseX-fpsLeft)/(fpsWidth+fpsGap));if(mouseX>=fpsLeft&&column>=0&&column<6)requestedFps.store((row*6+column+1)*30);}
       else if(mouseY>=337&&mouseY<=363&&mouseX>=panelX+82&&mouseX<=panelRight-20){activeOverlay=Overlay((int(activeOverlay)+1)%8);}
-      else if(mouseY>=372&&mouseY<=407&&mouseX>=panelX+20&&mouseX<=panelRight-20){if(persistenceBusy.load())return 0;const float half=(panelRight-panelX-45)/2;if(mouseX<=panelX+20+half&&MessageBoxW(window,L"Reset life and clear the Evolution Atlas history?",L"Life Engine",MB_ICONWARNING|MB_OKCANCEL)!=IDOK)return 0;std::unique_lock lock(simulationMutex);if(mouseX<=panelX+20+half)simulation.reset();else simulation.regenerate(nextWorldSeed++);selectedId=-1;simulation.select(-1);simulation.watch(-1);clearFollowing(true);cameraX=0;cameraY=0;}
+      else if(mouseY>=372&&mouseY<=407&&mouseX>=panelX+20&&mouseX<=panelRight-20){if(persistenceBusy.load())return 0;const float half=(panelRight-panelX-45)/2;if(mouseX<=panelX+20+half&&MessageBoxW(window,L"Reset life and clear the Evolution Atlas history?",L"Life Engine",MB_ICONWARNING|MB_OKCANCEL)!=IDOK)return 0;std::unique_lock lock(simulationMutex);if(mouseX<=panelX+20+half)simulation.reset();else simulation.regenerate(nextWorldSeed++);selectedId=-1;simulation.select(-1);simulation.watch(-1);clearFollowing(true);cameraX=0;cameraY=0;invalidatePresentation();publishSimulationFrame(true);}
       else if(mouseY>=463&&mouseY<=570){const float buttonWidth=(aside-75)/6;const int row=(mouseY-463)/38,column=int((mouseX-(panelX+20))/(buttonWidth+5));const int tool=row*6+column;if(column>=0&&column<6&&tool>=0&&tool<12)activeTool=Tool(tool);}
-      else if(mouseY>=598&&mouseY<=627&&mouseX>=panelRight-62&&mouseX<=panelRight-20){if(persistenceBusy.load())return 0;std::unique_lock lock(simulationMutex);selectedId=-1;simulation.select(-1);simulation.watch(-1);clearFollowing();}
+      else if(mouseY>=598&&mouseY<=627&&mouseX>=panelRight-62&&mouseX<=panelRight-20){if(persistenceBusy.load())return 0;std::unique_lock lock(simulationMutex);selectedId=-1;simulation.select(-1);simulation.watch(-1);clearFollowing();publishSimulationFrame(true);}
       InvalidateRect(window,nullptr,FALSE);return 0;
     }
     if(mouseY>=82&&mouseX<contentRight){if(message==WM_MBUTTONDOWN||activeTool==Tool::Pan){followCamera.release();dragging=true;dragOrigin={mouseX,mouseY};dragCameraX=cameraX;dragCameraY=cameraY;SetCapture(window);}else applyTool(mouseX,mouseY);InvalidateRect(window,nullptr,FALSE);}return 0;
@@ -379,7 +409,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR commandLine, int show)
   catch (...) {if(headlessMode)return 3;life::logMessage("Skia initialization failed with an unknown error");MessageBoxW(nullptr,L"The embedded Skia renderer could not be loaded. See the local diagnostic log for details.",life::AppDisplayName,MB_ICONERROR);return 1;}
   if(arguments.find(L"--self-test")!=std::wstring::npos){try{life::NativeSimulation smoke(96,60,.2,500,53,17);for(int tick=0;tick<120;++tick)smoke.step();const auto metrics=smoke.metrics();if(metrics.ticks!=120||metrics.organisms<1||!api)throw std::runtime_error("simulation invariant failed");const auto report=libraryPath().parent_path()/"self-test.txt";std::ofstream output(report);output<<"LFE-NNUE v"<<life::AppVersion<<" self-test PASS\n"<<"ticks="<<metrics.ticks<<" organisms="<<metrics.organisms<<"\n";life::logMessage("self-test passed");api.reset();return 0;}catch(const std::exception& error){life::logMessage(std::string("self-test failed: ")+error.what());api.reset();return 2;}}
   fontManager=api->fontManagerCreateDefault();auto normal=api->fontStyleNew(400,5,0),bold=api->fontStyleNew(700,5,0);regularTypeface=api->fontManagerCreateTypeface(fontManager,"Arial",normal);boldTypeface=api->fontManagerCreateTypeface(fontManager,"Arial",bold);api->fontStyleDelete(normal);api->fontStyleDelete(bold);
-  if(headlessMode){renderWorkers=std::make_unique<RenderWorkers>();timeBeginPeriod(1);const int result=runHeadlessScript(headlessScriptPath(arguments));timeEndPeriod(1);renderWorkers.reset();if(regularTypeface)api->typefaceUnref(regularTypeface);if(boldTypeface)api->typefaceUnref(boldTypeface);if(fontManager)api->fontManagerUnref(fontManager);api.reset();return result;}
+  if(headlessMode){renderWorkers=std::make_unique<RenderWorkers>();timeBeginPeriod(1);const int result=runHeadlessScript(headlessScriptPath(arguments));timeEndPeriod(1);renderWorkers.reset();releaseTextCache();if(regularTypeface)api->typefaceUnref(regularTypeface);if(boldTypeface)api->typefaceUnref(boldTypeface);if(fontManager)api->fontManagerUnref(fontManager);api.reset();return result;}
   WNDCLASSW type{}; type.lpfnWndProc = procedure; type.hInstance = instance;
   type.lpszClassName = L"LifeEngineSkiaPreview"; type.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));
   RegisterClassW(&type);
@@ -391,10 +421,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR commandLine, int show)
   if(followBenchmark)toggleFollowing(window);
   timeBeginPeriod(1);
   if(uiBenchmark){uiBenchmarkStart=nextBenchmarkInput=measurementStart=lastRenderRequest=previousBenchmarkFrame=std::chrono::steady_clock::now();uiBenchmarkTicks.store(0);uiBenchmarkFrames=uiBenchmarkInputs=measuredFrames=0;uiBenchmarkRenderMs=0;presentationDrops.store(0);inputLatenciesMs.clear();frameIntervalsMs.clear();pendingInput.reset();}
-  simulationThread=std::jthread([](std::stop_token stop){auto next=std::chrono::steady_clock::now();while(!stop.stop_requested()){if(paused.load()){next=std::chrono::steady_clock::now();std::this_thread::sleep_for(std::chrono::milliseconds(2));continue;}const int target=std::max(1,requestedTps.load());const auto interval=std::chrono::duration<double>(1.0/target);const auto now=std::chrono::steady_clock::now();if(now<next){std::this_thread::sleep_until(next);continue;}{std::unique_lock lock(simulationMutex);simulation.step();}measuredTicks.fetch_add(1);if(uiBenchmark)uiBenchmarkTicks.fetch_add(1);next+=std::chrono::duration_cast<std::chrono::steady_clock::duration>(interval);if(std::chrono::steady_clock::now()-next>std::chrono::milliseconds(250))next=std::chrono::steady_clock::now();}});
+  presentationEnabled=true;invalidatePresentation();for(int frame=0;frame<3;++frame)publishSimulationFrame(true);
+  simulationThread=std::jthread([](std::stop_token stop){auto next=std::chrono::steady_clock::now();while(!stop.stop_requested()){if(paused.load()){next=std::chrono::steady_clock::now();{std::unique_lock lock(simulationMutex,std::try_to_lock);if(lock.owns_lock())publishSimulationFrame();}std::this_thread::sleep_for(std::chrono::milliseconds(2));continue;}const int target=std::max(1,requestedTps.load());const auto interval=std::chrono::duration<double>(1.0/target);const auto now=std::chrono::steady_clock::now();if(now<next){std::this_thread::sleep_until(next);continue;}{std::unique_lock lock(simulationMutex);simulation.step();publishSimulationFrame();}measuredTicks.fetch_add(1);if(uiBenchmark)uiBenchmarkTicks.fetch_add(1);next+=std::chrono::duration_cast<std::chrono::steady_clock::duration>(interval);if(std::chrono::steady_clock::now()-next>std::chrono::milliseconds(250))next=std::chrono::steady_clock::now();}});
   presentationThread=std::jthread([window](std::stop_token stop){auto next=std::chrono::steady_clock::now();while(!stop.stop_requested()){const int target=std::clamp(requestedFps.load(),30,360);next+=std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(1.0/target));if(!presentationPending.exchange(true))PostMessageW(window,PresentMessage,0,0);else presentationDrops.fetch_add(1);std::this_thread::sleep_until(next);if(std::chrono::steady_clock::now()-next>std::chrono::milliseconds(100))next=std::chrono::steady_clock::now();}});
   SetTimer(window, 1, 50, nullptr);
   MSG message{}; while (GetMessageW(&message, nullptr, 0, 0) > 0) { TranslateMessage(&message); DispatchMessageW(&message); }
-  simulationThread.request_stop();presentationThread.request_stop();simulationThread.join();presentationThread.join();renderWorkers.reset();timeEndPeriod(1);
-  if(regularTypeface)api->typefaceUnref(regularTypeface);if(boldTypeface)api->typefaceUnref(boldTypeface);if(fontManager)api->fontManagerUnref(fontManager);api.reset(); return int(message.wParam);
+  simulationThread.request_stop();presentationThread.request_stop();simulationThread.join();presentationThread.join();presentationEnabled=false;renderWorkers.reset();timeEndPeriod(1);
+  releaseTextCache();if(regularTypeface)api->typefaceUnref(regularTypeface);if(boldTypeface)api->typefaceUnref(boldTypeface);if(fontManager)api->fontManagerUnref(fontManager);api.reset(); return int(message.wParam);
 }

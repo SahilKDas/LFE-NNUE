@@ -3,6 +3,7 @@ resize 1920 1080
 seed 1000
 select family
 follow
+exchange on
 step 40
 frame 60 16.6666667
 assert following on
@@ -11,6 +12,9 @@ assert target family
 assert family-min 200
 assert decisions-min 1
 assert snapshot-coherent
+assert family-pixels-coherent
+assert family-edges-coherent
+assert text-cache-coherent
 assert palette-coherent
 overlay resources
 frame
@@ -42,6 +46,8 @@ assert following on
 assert target family
 step 20
 frame 30 16.6666667
+assert family-pixels-coherent
+assert family-edges-coherent
 compact off
 resize 960 640
 zoom 4

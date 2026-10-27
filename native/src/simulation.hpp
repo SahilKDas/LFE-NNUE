@@ -100,6 +100,7 @@ class NativeSimulation {
   std::vector<std::vector<size_t>> regionBatches_;
   std::vector<uint8_t> regionAwake_,dirtyTiles_;
   std::vector<uint32_t> dirtyVersions_;
+  std::array<std::vector<uint32_t>,4> dirtyLayerVersions_;
   std::vector<uint32_t> regionNutrientTotals_;
   std::vector<uint16_t> nutrientScratch_;
   std::vector<int> drainageNutrientScratch_,drainageWaterScratch_;
@@ -116,7 +117,7 @@ class NativeSimulation {
   int wrappedIndex(int x,int y) const;
   int wrapX(int x) const;
   int wrapY(int y) const;
-  void markDirtyIndex(int index);
+  void markDirtyIndex(int index,uint8_t layers=15);
   void markAllDirty();
   void rebuildRegionIndex();
   std::pair<int,int> rotated(int x, int y, int direction) const;
@@ -186,6 +187,8 @@ public:
   int selectedSpecies() const{return selectedSpeciesId_;}
   std::vector<uint16_t> takeDirtyTiles();
   std::vector<uint16_t> changedTiles(std::vector<uint32_t>& knownVersions) const;
+  void changedTilesInto(std::vector<uint32_t>& knownVersions,std::vector<uint16_t>& result) const;
+  void changedLayerTilesInto(size_t layer,std::vector<uint32_t>& knownVersions,std::vector<uint16_t>& result) const;
   static constexpr int dirtyTileSize(){return DirtyTileSize;}
   int lineageRecordCount() const { return int(organisms_.size()); }
   int deadLineageRecordCount() const { return deadCount_; }
