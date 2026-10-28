@@ -42,12 +42,14 @@ struct SpeciesSummary {
   std::array<uint8_t,25> recentDeathCauses{};
   uint8_t recentDeathCount{},recentDeathCursor{};
   GenomeDescriptor representative;
+  // Reserved zero columns preserve the v1/v2 archive layout; no depth systems run.
   std::array<int,3> habitatPopulation{};
   float averageElevation{};
   uint8_t dominantHabitat{};
 };
 
 struct EcologySample {
+  // Reserved zero columns: EcologySample is serialized as a fixed-width record.
   int cavePopulation{},bridgePopulation{},rainfall{};
   float averageElevation{},averageMoisture{};
   int tick{},population{},births{},plantEaters{},scavengers{},mineralEaters{},decomposers{},predators{},species{},criticalRespiratory{};

@@ -1,0 +1,12 @@
+resize 1920 1080
+frame
+assert-ui-nonblocking
+exchange on
+frame 3
+assert raster-coherent
+atlas on
+frame
+atlas off
+assert-ui-nonblocking
+frame 3
+assert raster-coherent

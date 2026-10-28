@@ -29,10 +29,10 @@ Use one command per line; lines starting with `#` are comments. Paths can be quo
 | `select ID` / `select family` | Select an organism or the fixture's family root, clearing previous follow state. |
 | `follow` / `release` | Use the same camera start/release controls as the app. |
 | `descendant` | After death, follow the oldest living direct child, otherwise the oldest living descendant; ID breaks ties. |
-| `family on/off`, `compact on/off`, `atlas on/off`, `weather on/off` | Change local view controls. |
+| `family on/off`, `compact on/off`, `atlas on/off` | Change local view controls. |
 | `exchange on/off` | Exercise the production three-buffer frame handoff during scripted, non-realtime checks. `benchmark` enables it. |
 | `zoom Z` / `pan DX DY` | Set zoom (0.2–12), or pan in screen pixels and release following. |
-| `overlay NAME` | Choose terrain, resources, productivity, climate, species, nutrients, decomposition, or habitat. |
+| `overlay NAME` | Choose terrain, resources, productivity, climate, species, nutrients, decomposition. |
 | `resize W H` | Set the offscreen viewport, within the app's supported desktop size range. |
 | `step N` | Advance exactly N simulation ticks, independently of the saved pause setting. |
 | `frame [N] [milliseconds]` | Render frames and advance camera smoothing by the specified frame duration; default is one frame at 60 FPS. Simulation does not advance. |
@@ -46,6 +46,8 @@ Use one command per line; lines starting with `#` are comments. Paths can be quo
 | `benchmark SECONDS PATH.json` | Run concurrent simulation and offscreen rendering, targeting 60 TPS/FPS for 1–120 seconds; report frame percentiles and command-to-frame latency. |
 | `benchmark-sync SECONDS PATH.json` | Run the same workload through the legacy live-state read-lock path for comparison. |
 | `play SECONDS PATH.json` | Run the current regular game at 60 TPS/FPS, without seeding creatures, changing lifecycle rules, or injecting resources. |
+| `assert-ui-nonblocking` | Hold the physics lock while submitting real painting/selection commands, then verify deferred execution and completion. Functional test; no desktop messages. |
+| `ui-play SECONDS PATH.json` | Start a regular game, exercise overlays, Atlas tabs, painting, selection, follow, pan and zoom while rendering offscreen. Report immediate feedback and sequence-acknowledged command-to-visible latency separately from FPS/TPS and frame spikes. Power-gated; 10–60 seconds. |
 | `nnue auto/scalar` | Compare runtime-selected AVX2 inference with the deterministic scalar implementation. |
 
 Assertions: `assert following on/off`, `alive on/off`, `wrapped on/off`, `compact on/off`, `target ID/family`, `decisions-min N`, `family-min N`, `camera-held`, `snapshot-coherent`, `palette-coherent`, `family-pixels-coherent`, `family-edges-coherent`, and `text-cache-coherent`. Prefix each property with `assert`. These checks cover exact captured decisions, dirty-tile and family-mask invalidation, and pixel-identical cached versus uncached text rendering.

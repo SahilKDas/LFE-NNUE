@@ -10,7 +10,7 @@ uint64_t digest(const life::NativeSimulation& simulation){
   const auto mix=[&](uint64_t item){value^=item;value*=1099511628211ULL;};
   for(const auto cell:simulation.cells)mix(cell);
   for(const auto owner:simulation.owners)mix(uint32_t(owner));
-  for(const auto nutrient:simulation.world.nutrients)mix(nutrient);for(const auto water:simulation.moisture)mix(water);for(const auto elevation:simulation.world.elevation)mix(elevation);for(const auto habitat:simulation.world.habitat)mix(habitat);
+  for(const auto nutrient:simulation.world.nutrients)mix(nutrient);
   for(const auto& sample:simulation.atlasSnapshot().timeline){mix(sample.tick);mix(sample.population);mix(sample.births);mix(sample.cavePopulation);mix(sample.bridgePopulation);mix(sample.rainfall);for(const int deaths:sample.deaths)mix(deaths);}
   for(const auto& species:simulation.atlasSnapshot().species){mix(species.id);mix(species.parentId);mix(species.population);mix(species.extinct);}
   return value;

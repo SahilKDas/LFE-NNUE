@@ -33,7 +33,7 @@ void NativeSimulation::refreshFamily(int root) const {
 WatchedSnapshot NativeSimulation::watchedSnapshot(size_t stepsBack) const {
   WatchedSnapshot result;result.pose=watchedPose();result.tick=ticks_;const auto* organism=organismById(watchedId_);if(!organism)return result;
   refreshFamily(watchedId_);result.age=organism->lifetime;result.generation=organism->lineage->generation;result.energy=organism->energy;result.body=organism->cells;result.deathCause=organism->lineage->deathCause;result.directChildren=organism->lineage->directOffspring;result.offspringCountComplete=organism->lineage->offspringCountComplete;
-  constexpr const char* habitats[]={"Surface","Cave","Bridge"};result.habitat=habitats[world.habitat[wrappedIndex(organism->x,organism->y)]];
+  constexpr const char* biomes[]={"Plains","Fertile","Desert","Water","Mountain"};result.habitat=biomes[world.terrain[wrappedIndex(organism->x,organism->y)]];
   const Organism* best=nullptr;for(const auto& entry:familyDescendants_){const auto* candidate=organismById(entry.id);if(!candidate)continue;const bool child=candidate->parentId==watchedId_;if(!candidate->living)continue;result.livingChildren+=child;++result.livingDescendants;
     if(!best||((best->parentId!=watchedId_)&&child)||((best->parentId==watchedId_)==child&&(candidate->lineage->birthTick<best->lineage->birthTick||(candidate->lineage->birthTick==best->lineage->birthTick&&candidate->id<best->id))))best=candidate;}
   result.nextDescendant=best?best->id:-1;result.decisionCount=int(decisionCount_);if(decisionCount_){result.hasDecision=true;const auto offset=std::min(stepsBack,decisionCount_-1);result.decision=watchedDecisions_[(decisionCursor_+128-1-offset)%128];}return result;

@@ -1,0 +1,3 @@
+# Normal game, plants and evolving organisms; no window or desktop input.
+resize 1920 1080
+ui-play 10 headless/ui-latency.json
