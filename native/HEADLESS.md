@@ -58,10 +58,20 @@ The compatibility fields `throughput_passed` and `smoothness_passed` retain the 
 
 Frames render before a fixed presentation deadline and are held until that deadline in both the regular application and headless runner. Raster/UI work timings exclude that hold. The runner still records distinct displayed ticks and their maximum gap, so pacing an unchanged image cannot conceal a stalled simulation.
 
-The frame handoff has exactly three reusable buffers. Rendering consumes completed ticks and never needs the live physics read lock; old queued frames can be replaced rather than accumulating a backlog. The benchmark separately reports `render_fps`, `snapshot_fps`, and `unique_tick_fps` so drawing an unchanged frame cannot masquerade as visible simulation progress. Fonts and text blobs are bounded caches; pixel-coherence assertions preserve the original typography.
+At matching TPS and FPS, completed snapshots are consumed in publication order with a short bounded presentation cushion; at other rates the renderer takes the newest snapshot. Initial presentation delay is reported separately as startup_update_ms. The frame handoff has exactly three reusable buffers. Rendering consumes completed ticks and never needs the live physics read lock; the queue cannot grow beyond those three buffers. Ownership data is copied when family/species rendering needs it, with complete hydration on activation. The benchmark separately reports `render_fps`, `snapshot_fps`, and `unique_tick_fps` so drawing an unchanged frame cannot masquerade as visible simulation progress. Fonts and text blobs are bounded caches; pixel-coherence assertions preserve the original typography.
 
 The engine uses three reusable analysis workers for independent physiology and soil/drainage work. On classification ticks, an environment coordinator overlaps the independent world-layer work with species classification and dead-leaf compaction. Both coordinators share a bounded queue of small independent jobs; helpers alternate between runnable jobs. World interactions and random draws retain their serial order. Together with four raster workers, UI, simulation coordinator, presentation timer, and an optional persistence worker, the peak is twelve application-created threads. Overlapping phase timings are not additive. `native_optimization_contracts` compares serial/scalar and parallel/SIMD simulations with aggressive lineage pruning, sparse neural mutation and RNG consumption, conservative species rejection, and the original lineage-pruning algorithm.
 
 Deadline threads use high-resolution waitable timers and Windows HighQoS/ideal-processor hints on hybrid CPUs. These are application-thread hints; they do not raise priority, impose hard affinity, or change the laptop's power plan. See [Microsoft's QoS documentation](https://learn.microsoft.com/en-us/windows/win32/procthread/quality-of-service).
 
 Headless tests use their own process and working-directory files. Below-normal process priority is useful when sharing the laptop, but its scheduling delays should not be mistaken for an isolated normal-priority throughput measurement. The suite never closes or controls an already-running Life Engine window.
+
+Performance commands are power-gated. Battery Saver must be off and battery
+charge must be at least 30%, including while charging. Unknown power state
+blocks validation; a known desktop with no battery is allowed. Scripts containing
+`play`, `benchmark`, or `benchmark-sync` are checked before seed/warm-up commands.
+The runner checks again during measurement and at completion. Deferred JSON
+reports use `validation: "deferred"` and `performance_passed: null`; process exit
+code 3 means deferred. Functional command scripts and fixed-tick replay tests
+remain available. The native CLI and optional UI performance runners apply the
+same power conditions. Ordinary gameplay is unaffected.

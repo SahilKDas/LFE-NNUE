@@ -9,7 +9,7 @@ uint32_t worldCellColor(int x,int y,const life::ClimateSample& climate,bool back
   else if(overlay==Overlay::Decomposition){const int carrion=resource==uint8_t(life::ResourceType::Carrion)?200:0,nutrient=std::min(180,int(renderNutrients[index])*180/1600);base=0xff000000u|uint32_t(55+carrion)<<16|uint32_t(35+nutrient)<<8|45;}
   if(overlay==Overlay::Terrain&&!cell){const int west=y*life::WorldWidth+std::max(0,x-1),north=std::max(0,y-1)*life::WorldWidth+x;int shade=std::clamp(100+(int(renderElevation[west])-renderElevation[index]+int(renderElevation[north])-renderElevation[index])/3,65,125);if(habitat==uint8_t(life::HabitatType::Cave))shade=(renderHabitat[west]!=habitat||renderHabitat[north]!=habitat)?145:78;if(habitat==uint8_t(life::HabitatType::Bridge))shade=(x%4==0||renderHabitat[north]!=habitat)?135:95;const auto channel=[&](int shift){return uint32_t(std::min(255,int((base>>shift)&255)*shade/100));};base=0xff000000u|(channel(16)<<16)|(channel(8)<<8)|channel(0);}
   uint32_t color=cell?cellColors[cell]:base;
-  if(overlay==Overlay::Species&&cell){const auto found=renderSpeciesByOwner.find(renderOwners[index]);if(found!=renderSpeciesByOwner.end()&&found->second>0){const uint32_t hash=uint32_t(found->second)*2654435761u;color=0xff000000u|((64+(hash&127))<<16)|((64+((hash>>8)&127))<<8)|(64+((hash>>16)&127));}}
+  if(overlay==Overlay::Species&&cell&&renderOwnersReady){const auto found=renderSpeciesByOwner.find(renderOwners[index]);if(found!=renderSpeciesByOwner.end()&&found->second>0){const uint32_t hash=uint32_t(found->second)*2654435761u;color=0xff000000u|((64+(hash&127))<<16)|((64+((hash>>8)&127))<<8)|(64+((hash>>16)&127));}}
   return color;
 }
 uint32_t cachedWorldCellColor(int x,int y,const life::ClimateSample& climate){
@@ -25,15 +25,15 @@ void prepareTerrainBackground(){
 }
 void prepareWorldPalette(){
   prepareTerrainBackground();
-  static int previousOverlay=-1,previousClimateTick=-1;static uint64_t previousSpecies=UINT64_MAX;const bool climate=activeOverlay==Overlay::Climate||activeOverlay==Overlay::Productivity;
-  const bool all=renderPalette.size()!=renderCells.size()||frameCopiedAll||previousOverlay!=int(activeOverlay)||(climate&&previousClimateTick!=renderMetrics.ticks/30)||(activeOverlay==Overlay::Species&&previousSpecies!=renderAtlasRevision);
-  renderPalette.resize(renderCells.size());
-  if(all)renderWorkers->run([&](int partition){const int begin=life::WorldHeight*partition/10,end=life::WorldHeight*(partition+1)/10;for(int y=begin;y<end;++y){const auto local=life::climateAt(y,life::WorldHeight,renderMetrics.ticks);for(int x=0;x<life::WorldWidth;++x)renderPalette[y*life::WorldWidth+x]=cachedWorldCellColor(x,y,local);}});
+  static int previousOverlay=-1,previousClimateTick=-1;static uint64_t previousSpecies=UINT64_MAX;static bool previousOwnersReady=false;const bool climate=activeOverlay==Overlay::Climate||activeOverlay==Overlay::Productivity;
+  const bool all=renderPalette.size()!=renderCells.size()||frameCopiedAll||previousOverlay!=int(activeOverlay)||(climate&&previousClimateTick!=renderMetrics.ticks/30)||(activeOverlay==Overlay::Species&&(previousSpecies!=renderAtlasRevision||previousOwnersReady!=renderOwnersReady));
+  renderPalette.resize(renderCells.size());std::array<life::ClimateSample,life::WorldHeight> climateRows;if(climate)for(int y=0;y<life::WorldHeight;++y)climateRows[y]=life::climateAt(y,life::WorldHeight,renderMetrics.ticks);
+  if(all)renderWorkers->run([&](int partition){const int begin=life::WorldHeight*partition/10,end=life::WorldHeight*(partition+1)/10;for(int y=begin;y<end;++y){const auto local=climate?climateRows[y]:life::ClimateSample{};for(int x=0;x<life::WorldWidth;++x)renderPalette[y*life::WorldWidth+x]=cachedWorldCellColor(x,y,local);}});
   else if(!frameDirtyTiles.empty()){
     // Expand tile writes by one cell because terrain lighting reads north/west neighbors.
     // Partition by disjoint output rows so overlapping dirty tiles never race.
     constexpr int tileSize=life::NativeSimulation::dirtyTileSize(),columns=(life::WorldWidth+tileSize-1)/tileSize;
-    renderWorkers->run([&](int partition){const int begin=life::WorldHeight*partition/10,end=life::WorldHeight*(partition+1)/10;for(uint16_t tile:frameDirtyTiles){const int tx=(tile%columns)*tileSize,ty=(tile/columns)*tileSize;for(int y=std::max(begin,ty);y<std::min(end,std::min(life::WorldHeight,ty+tileSize+1));++y){const auto local=life::climateAt(y,life::WorldHeight,renderMetrics.ticks);for(int x=tx;x<std::min(life::WorldWidth,tx+tileSize+1);++x)renderPalette[y*life::WorldWidth+x]=cachedWorldCellColor(x,y,local);}}});
+    renderWorkers->run([&](int partition){const int begin=life::WorldHeight*partition/10,end=life::WorldHeight*(partition+1)/10;for(uint16_t tile:frameDirtyTiles){const int tx=(tile%columns)*tileSize,ty=(tile/columns)*tileSize;for(int y=std::max(begin,ty);y<std::min(end,std::min(life::WorldHeight,ty+tileSize+1));++y){const auto local=climate?climateRows[y]:life::ClimateSample{};for(int x=tx;x<std::min(life::WorldWidth,tx+tileSize+1);++x)renderPalette[y*life::WorldWidth+x]=cachedWorldCellColor(x,y,local);}}});
   }
-  previousOverlay=int(activeOverlay);previousClimateTick=renderMetrics.ticks/30;previousSpecies=renderAtlasRevision;frameCopiedAll=false;frameDirtyTiles.clear();
+  previousOverlay=int(activeOverlay);previousClimateTick=renderMetrics.ticks/30;previousSpecies=renderAtlasRevision;previousOwnersReady=renderOwnersReady;frameCopiedAll=false;frameDirtyTiles.clear();
 }

@@ -24,6 +24,12 @@ assert palette-coherent
 overlay nutrients
 frame
 assert palette-coherent
+overlay climate
+frame
+assert palette-coherent
+overlay productivity
+frame
+assert palette-coherent
 overlay species
 frame
 assert palette-coherent

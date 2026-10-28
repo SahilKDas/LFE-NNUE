@@ -1,4 +1,5 @@
 #pragma once
+#include "frame_pacer.hpp"
 #include <array>
 #include <atomic>
 #include <condition_variable>
@@ -27,7 +28,7 @@ class AnalysisPool {
   std::shared_ptr<Job> pickLocked(){for(size_t attempt=0;attempt<active_.size();++attempt){const size_t index=(cursor_+attempt)%active_.size();const auto& job=active_[index];if(job&&job->next.load(std::memory_order_relaxed)<64){cursor_=(index+1)%active_.size();return job;}}return {};}
   std::shared_ptr<Job> takeWork(){std::lock_guard lock(mutex_);return pickLocked();}
 public:
-  AnalysisPool(){for(auto& job:jobs_)job=std::make_shared<Job>();for(int i=0;i<3;++i)threads_.emplace_back([this](std::stop_token stop){while(!stop.stop_requested()){std::unique_lock lock(mutex_);wake_.wait(lock,[&]{return stop.stop_requested()||runnableLocked();});if(stop.stop_requested())break;auto job=pickLocked();lock.unlock();if(job)job->runOne();}});}
+  AnalysisPool(){for(auto& job:jobs_)job=std::make_shared<Job>();for(int i=0;i<3;++i)threads_.emplace_back([this](std::stop_token stop){FramePacer::deadlineWork();while(!stop.stop_requested()){std::unique_lock lock(mutex_);wake_.wait(lock,[&]{return stop.stop_requested()||runnableLocked();});if(stop.stop_requested())break;auto job=pickLocked();lock.unlock();if(job)job->runOne();}});}
   ~AnalysisPool(){{std::lock_guard lock(mutex_);for(auto& thread:threads_)thread.request_stop();}wake_.notify_all();for(auto& thread:threads_)thread.join();}
   void run(size_t count,const std::function<void(size_t,size_t)>& task){
     if(count<256){task(0,count);return;}

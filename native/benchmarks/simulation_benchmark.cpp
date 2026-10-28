@@ -1,4 +1,5 @@
 #include "simulation.hpp"
+#include "performance_power.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
@@ -7,6 +8,7 @@
 #include <unordered_set>
 
 int main(int argc,char** argv){
+  if(const auto power=life::performancePowerState();!power.eligible()){std::cerr<<"DEFERRED: "<<power.reason()<<'\n';return 3;}
   const int seconds=argc>1?std::max(1,std::atoi(argv[1])):60;
   life::NativeSimulation simulation(life::WorldWidth,life::WorldHeight,.2,500,524114809,334462);
   const int populated=simulation.seedBenchmarkMovers(10'000);
@@ -15,8 +17,9 @@ int main(int argc,char** argv){
   simulation.step(120);
   const int birthsBefore=simulation.birthCount(),deathsBefore=simulation.deadLineageRecordCount();
   const auto start=std::chrono::steady_clock::now(),deadline=start+std::chrono::seconds(seconds);
-  int ticks=0;
-  while(std::chrono::steady_clock::now()<deadline){simulation.step();++ticks;}
+  int ticks=0;auto nextPowerCheck=start;
+  while(std::chrono::steady_clock::now()<deadline){if(std::chrono::steady_clock::now()>=nextPowerCheck){if(const auto power=life::performancePowerState();!power.eligible()){std::cerr<<"DEFERRED: "<<power.reason()<<'\n';return 3;}nextPowerCheck=std::chrono::steady_clock::now()+std::chrono::seconds(1);}simulation.step();++ticks;}
+  if(const auto power=life::performancePowerState();!power.eligible()){std::cerr<<"DEFERRED: "<<power.reason()<<'\n';return 3;}
   const double elapsed=std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count();
   const auto metrics=simulation.metrics();
   const auto plantTiles=std::count(simulation.world.resources.begin(),simulation.world.resources.end(),uint8_t(life::ResourceType::Plant));

@@ -10,6 +10,10 @@ namespace life {
 class FramePacer {
   HANDLE timer_{CreateWaitableTimerExW(nullptr,nullptr,0x00000002,TIMER_MODIFY_STATE|SYNCHRONIZE)};
 public:
+  static void deadlineWork(){
+    THREAD_POWER_THROTTLING_STATE qos{};qos.Version=THREAD_POWER_THROTTLING_CURRENT_VERSION;qos.ControlMask=THREAD_POWER_THROTTLING_EXECUTION_SPEED;
+    SetThreadInformation(GetCurrentThread(),ThreadPowerThrottling,&qos,sizeof(qos));
+  }
   static void preferFastCore(unsigned role){
     static const auto cores=[] {
       std::vector<PROCESSOR_NUMBER> result;DWORD bytes=0;GetLogicalProcessorInformationEx(RelationProcessorCore,nullptr,&bytes);std::vector<unsigned char> buffer(bytes);
@@ -24,8 +28,7 @@ public:
     if(!timer_)timer_=CreateWaitableTimerW(nullptr,FALSE,nullptr);
     // Deadline-driven work must not be mistaken for background EcoQoS work on
     // hybrid CPUs. This is a scheduling hint, not affinity or raised priority.
-    THREAD_POWER_THROTTLING_STATE qos{};qos.Version=THREAD_POWER_THROTTLING_CURRENT_VERSION;qos.ControlMask=THREAD_POWER_THROTTLING_EXECUTION_SPEED;
-    SetThreadInformation(GetCurrentThread(),ThreadPowerThrottling,&qos,sizeof(qos));
+    deadlineWork();
     preferFastCore(role);
   }
   FramePacer(const FramePacer&)=delete;

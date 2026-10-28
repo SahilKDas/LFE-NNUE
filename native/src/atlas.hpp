@@ -22,15 +22,15 @@ class SpeciesDistanceCache {
 public:
   struct Entry {GenomeDescriptor key;uint64_t hash{};uint32_t epoch{};size_t checked{},best{SIZE_MAX};double distance{2};uint32_t jobEpoch{};};
 private:
-  std::vector<Entry> entries_;uint32_t epoch_{};
+  std::vector<Entry> entries_;uint32_t epoch_{};size_t used_{};
 public:
-  void invalidate(){if(++epoch_==0){for(auto& entry:entries_)entry.epoch=0;epoch_=1;}}
-  void begin(size_t organisms,bool reuse=false){size_t count=16;while(count<organisms*2)count*=2;if(entries_.size()<count){entries_.assign(count,{});epoch_=1;}else if(!reuse)invalidate();}
+  void invalidate(){used_=0;if(++epoch_==0){for(auto& entry:entries_)entry.epoch=0;epoch_=1;}}
+  void begin(size_t organisms,bool reuse=false){size_t count=16;while(count<organisms*4)count*=2;if(entries_.size()<count){entries_.assign(count,{});epoch_=1;used_=0;}else if(!reuse||used_+organisms>=entries_.size()*3/4)invalidate();}
   Entry& query(GenomeDescriptor key){
     key.brainGenomeId=key.mutability=key.neuralMutability=0;uint64_t hash=key.bodyHash^key.neuralSignature;
     const auto mix=[&](uint64_t value){hash^=value+0x9e3779b97f4a7c15ULL+(hash<<6)+(hash>>2);};
     for(auto count:key.cellCounts)mix(count);mix(key.dietMask);mix(key.perceptionRadius);mix(key.senseChannels);mix(key.moveRange);mix(key.birthDistance);mix(key.oxygenTolerance);mix(key.stressRecovery);mix(key.frailty);
-    const size_t start=size_t(hash)&(entries_.size()-1);for(size_t index=start;;index=(index+1)&(entries_.size()-1)){auto& entry=entries_[index];if(entry.epoch!=epoch_){entry={key,hash,epoch_,0,SIZE_MAX,2};return entry;}if(entry.hash==hash&&entry.key==key)return entry;}
+    const size_t start=size_t(hash)&(entries_.size()-1);for(size_t index=start;;index=(index+1)&(entries_.size()-1)){auto& entry=entries_[index];if(entry.epoch!=epoch_){++used_;entry={key,hash,epoch_,0,SIZE_MAX,2};return entry;}if(entry.hash==hash&&entry.key==key)return entry;}
   }
 };
 

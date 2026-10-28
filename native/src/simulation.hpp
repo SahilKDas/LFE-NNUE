@@ -17,10 +17,25 @@ namespace life {
 enum class DeathCause : uint8_t { None, Starvation, Combat, OldAge, ThermalStress, Terrain, RespiratoryFailure };
 const char* deathCauseName(DeathCause cause);
 struct BodyCell { CellType type; int x, y; int durability{}; };
+struct OrganismLineage {
+  int generation{},birthTick{},deathTick{-1},totalDescendants{},directOffspring{};
+  bool offspringCountComplete{true};
+  std::vector<std::string> mutations;std::string deathCause;
+};
+class LineageStorage {
+  std::unique_ptr<OrganismLineage> value_;
+public:
+  LineageStorage()=default;
+  LineageStorage(const LineageStorage& other){if(other.value_)value_=std::make_unique<OrganismLineage>(*other.value_);}
+  LineageStorage& operator=(const LineageStorage& other){if(this!=&other)value_=other.value_?std::make_unique<OrganismLineage>(*other.value_):nullptr;return *this;}
+  LineageStorage(LineageStorage&&) noexcept=default;LineageStorage& operator=(LineageStorage&&) noexcept=default;
+  OrganismLineage* operator->(){if(!value_)value_=std::make_unique<OrganismLineage>();return value_.get();}
+  const OrganismLineage* operator->()const{static const OrganismLineage empty;return value_?value_.get():&empty;}
+};
 struct Organism {
   // Keep the simulation's working set together; cold lineage text follows it.
   // Archive fields are written explicitly, so this does not change save layout.
-  int id{}, parentId{-1}, x{}, y{};
+  int id{},parentId{-1},x{},y{};
   std::vector<BodyCell> cells;
   int energy{StartEnergy}, minerals{}, lifetime{}, damage{};
   int birthDistance{4}, moveRange{4}, moveCount{}, direction{}, rotation{};
@@ -37,13 +52,11 @@ struct Organism {
   std::array<float,OutputSize> lastOutputs{};
   int mutability{5};double neuralMutability{8};
   size_t activeIndex{};
-  int generation{},birthTick{},deathTick{-1},totalDescendants{},directOffspring{};
-  bool offspringCountComplete{true};
   uint64_t brainGenomeId{};
   int speciesId{-1};
   uint64_t carrionConsumed{},nutrientsReleased{},decompositionEnergy{};
-  std::vector<std::string> mutations;
-  std::string deathCause;
+  LineageStorage lineage;
+  uint32_t bodyRevision{};
 };
 
 struct LineageSummary { int id{}, generation{}; bool alive{}; };
@@ -98,12 +111,17 @@ class NativeSimulation {
   std::vector<EvolutionEvent> evolutionEvents_;
   std::vector<Organism*> classificationBuffer_;
   SpeciesDistanceCache classificationCache_;
+  std::unordered_map<int,size_t> speciesSlotById_;
   std::shared_ptr<AnalysisPool> analysisPool_;
   bool parallelAnalysis_{true};
   std::vector<Nnue::MutationChange> neuralMutationScratch_;
   std::vector<GenomeDescriptor> classificationDescriptors_;
+  struct BodyDigest {uint64_t hash{};std::array<uint8_t,13> counts{};int id{-1};uint32_t revision{};uint8_t diet{};};
+  mutable std::vector<BodyDigest> bodyDigests_;
   std::vector<SpeciesDistanceCache::Entry*> classificationJobs_;
   std::vector<SpeciesDistanceCache::Entry*> classificationMatches_;
+  struct SpeciesPair {uint64_t body{},neural{};size_t slot{};};
+  std::vector<SpeciesPair> classificationPairs_;
   uint32_t classificationJobEpoch_{};
   struct PreparedPhysiology {int energy{};double temperature{},discomfort{},stressDelta{},agePressure{},energyPressure{},bodyPressure{};};
   std::vector<PreparedPhysiology> preparedPhysiology_;
@@ -113,6 +131,8 @@ class NativeSimulation {
   std::unordered_map<int,size_t> slotById_;
   std::vector<size_t> activeSlots_;
   std::vector<uint32_t> ownerSlots_;
+  struct OwnerSense {int id{-1};uint8_t category{4};};
+  std::vector<OwnerSense> ownerSense_;
   std::vector<int> pruneChildren_,pruneActiveIds_;
   std::vector<uint8_t> pruneProtected_,pruneRemoved_;
   std::vector<size_t> pruneParents_,pruneSlotRemap_;
@@ -160,7 +180,7 @@ class NativeSimulation {
   void mutate(Organism& organism);
   void die(Organism& organism, DeathCause cause);
   void processRespiratoryMortality();
-  GenomeDescriptor describeGenome(const Organism& organism) const;
+  GenomeDescriptor describeGenome(const Organism& organism,size_t slot=SIZE_MAX) const;
   void classifySpecies(bool useWorkers=true);
   void sampleEcology();
   void addEvolutionEvent(EvolutionEventType type,int speciesId,float value,const std::string& label);

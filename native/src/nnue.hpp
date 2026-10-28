@@ -9,6 +9,9 @@
 #include <immintrin.h>
 #include <optional>
 #include <atomic>
+#include <memory_resource>
+#include <memory>
+#include <mutex>
 
 namespace life {
 enum SenseChannel : uint16_t { Occupancy=1, Heading=2, Danger=4, Resources=8, Terrain=16, Temperature=32, Fertility=64, Internal=128, CarrionDensity=256, SoilNutrients=512 };
@@ -33,6 +36,7 @@ class Nnue {
   std::array<float, OutputSize> outputBias{}, output{};
   std::vector<uint16_t> active;
   mutable uint64_t signatureCache_{};
+  bool outputValid_{};
   std::optional<uint32_t> deferredSeed_;
   static bool trainedFeature(int index) {
     return (index < 24 * FeatureCategories && index % FeatureCategories < 11) ||
@@ -66,7 +70,7 @@ public:
       else if((index-=HiddenSize)<OutputSize*HiddenSize)value=&outputWeights[index/HiddenSize][index%HiddenSize];
       else value=&outputBias[index-OutputSize*HiddenSize];
       *value=float(*value+change.delta);
-    }active.clear();accumulator=hiddenBias;signatureCache_=0;
+    }active.clear();accumulator=hiddenBias;signatureCache_=0;outputValid_=false;
   }
   struct DeferredInit {};
   Nnue(Mulberry32& random,DeferredInit):deferredSeed_(random.checkpoint()){
@@ -89,7 +93,7 @@ public:
     bool changed=false;const auto perturb=[&](float& value){if(random()<probability){value=float(value+weight(random,magnitude));changed=true;}};
     for(auto& row:inputWeights)for(float& value:row)perturb(value);for(float& value:hiddenBias)perturb(value);for(auto& row:outputWeights)for(float& value:row)perturb(value);for(float& value:outputBias)perturb(value);
     if(!changed){const int index=int(std::floor(random()*OutputSize));outputBias[index]=float(outputBias[index]+weight(random,magnitude));}
-    active.clear();accumulator=hiddenBias;signatureCache_=0;
+    active.clear();accumulator=hiddenBias;signatureCache_=0;outputValid_=false;
   }
   // Reserve precisely the mutation's random stream before placement is known.
   // Failed births need neither a genome allocation nor writes to 100+ KB of weights.
@@ -117,7 +121,7 @@ public:
         value += double(std::max(0.0f, accumulator[hidden])) * outputWeights[action][hidden];
       output[action] = float(value);
     }
-    return output;
+    outputValid_=true;return output;
   }
   __attribute__((target("avx2")))
   const std::array<float, OutputSize>& evaluateWide(std::span<const uint16_t> features) {
@@ -136,11 +140,12 @@ public:
         value += double(std::max(0.0f, accumulator[hidden])) * outputWeights[action][hidden];
       output[action] = float(value);
     }
-    return output;
+    outputValid_=true;return output;
   }
   static bool wideAvailable(){static const bool supported=[] {__builtin_cpu_init();return bool(__builtin_cpu_supports("avx2"));}();return supported;}
   static void enableWide(bool value){wideEnabled_=value;}
   const std::array<float,OutputSize>& evaluate(std::span<const uint16_t> features){materialize();
+    if(outputValid_&&features.size()==active.size()&&std::equal(features.begin(),features.end(),active.begin()))return output;
     // Fetch independent rows together instead of stalling the accumulator chain
     // on each family's first cold row. Alignment keeps a row on one cache line.
     for(const auto feature:features)if(feature<inputWeights.size())__builtin_prefetch(inputWeights[feature].data(),0,3);
