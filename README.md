@@ -2,7 +2,7 @@
 
 A native Windows evolutionary ecosystem built with C++23, Win32, and Skia. Organisms inherit body plans, sparse NNUE brains, perception, diets, physiology, and mutations. Movement decisions belong exclusively to their neural networks.
 
-The supported application, tests, headless controls, and benchmarks are native. Node.js, npm, TypeScript, and a browser are not needed to build or run them. The retired TypeScript browser app, trainer, tests, npm manifests, and local Node dependencies have been removed. Native neural initialization, inference, inheritance, and mutation are unchanged.
+The supported application, tests, headless controls, and benchmarks are native. Node.js, npm, TypeScript, and a browser are not needed to build or run them. The retired browser app, trainer, npm tooling, WebView launcher/SDK, Nim-to-JavaScript fallback, and unused browser build output have been removed. Native neural initialization, inference, inheritance, and mutation are unchanged.
 
 ## Build and run
 
@@ -63,4 +63,4 @@ powershell -ExecutionPolicy Bypass -File scripts/package-native-release.ps1
 
 The packager builds and tests native code, verifies the embedded renderer headlessly, and writes a standalone ZIP and SHA-256 checksum under `dist/`. See [release notes](RELEASE_NOTES.md) for requirements and diagnostic paths.
 
-Historical non-TypeScript assets and the excluded WebView launcher are retained outside the supported native build; this cleanup does not remove old release/reference data or generated build directories.
+Native code, regression tests, save compatibility fixtures, and historical reference fixtures are retained. Native build directories and saved worlds are not part of browser cleanup. The release packager may recreate `dist/` for native release packages.
