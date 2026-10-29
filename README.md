@@ -1,140 +1,66 @@
 # LFE-NNUE v1.0.0
 
-A production-ready native Windows evolutionary ecosystem where organisms inherit body plans, physiology, perception, and sparse neural-network behavior. The TypeScript implementation remains as a compatibility and training reference; the supported v1.0 application is the native C++/Skia executable.
+A native Windows evolutionary ecosystem built with C++23, Win32, and Skia. Organisms inherit body plans, sparse NNUE brains, perception, diets, physiology, and mutations. Movement decisions belong exclusively to their neural networks.
 
-## What changed
+The supported application, tests, headless controls, and benchmarks are native. Node.js, npm, TypeScript, and a browser are not needed to build or run them. The retired TypeScript browser app, trainer, tests, npm manifests, and local Node dependencies have been removed. Native neural initialization, inference, inheritance, and mutation are unchanged.
 
-- Strict TypeScript replaces the original JavaScript, jQuery, and Webpack application.
-- Vite 8 provides the development server and optimized production build.
-- Vitest covers the TypeScript NNUE implementation.
-- A deterministic TypeScript trainer produces the initial browser model in public/trained-brain.json.
-- The interface keeps the original blue, black, white, and teal visual identity in a responsive layout.
+## Build and run
 
-## Run the application
+Requirements: Windows x64, CMake 3.20 or newer, and MinGW-w64 GCC with C++23 support. The required Skia library and license are included under `native/vendor/skia`.
 
-~~~sh
-npm install
-npm run dev
-~~~
+```powershell
+cmake -S native -B native/build-follow -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+cmake --build native/build-follow -j 4
+ctest --test-dir native/build-follow --output-on-failure
+./native/build-follow/life_engine.exe
+```
 
-Production verification:
+Use `native/build-follow` to keep development builds separate from an older running executable. The renderer DLL is embedded as a verified fallback; the packaged executable can run without a sidecar DLL.
 
-~~~sh
-npm test
-npm run build
-~~~
+## Simulation
 
-Retrain and verify the NNUE:
+- Flat 1024×640 terrain with fertile land, plains, deserts, impassable water and mountains, and toroidal borders.
+- Latitude-based seasons, climate pressure, energy metabolism, mineral construction costs, starvation, aging, and durable combat cells.
+- Plant, scavenger, mineral, and decomposer mouths; carrion and soil nutrients connect death to future plant growth.
+- Heritable NNUE weights, body mutations, perception radius/channel masks, oxygen tolerance, recovery, and frailty.
+- Gradual individual respiratory stress, with atmospheric mortality capped at one organism per ten ticks.
+- Region-indexed batches, sleeping inactive areas, cached sensing, SIMD inference with a scalar reference, dirty tiles, viewport culling, and immutable render snapshots.
 
-~~~sh
-npm run train
-npm run verify
-~~~
+Elevation, caves, bridges, projected weather, and downhill drainage have been removed. Older version 1/2 saves still load: cave/bridge passages become ordinary traversable land, and retired depth controls/history are cleared.
 
-The trainer uses backpropagation to teach the seed NNUE to seek food, avoid killers, and flock. Evolution then clones and mutates those weights independently for each organism. The entire toolchain runs through Node.js.
+## Controls and observation
 
-## Neural inputs
+The original blue, black, white, and teal theme and Arial fonts remain. Render caps are selectable from 30–360 FPS in increments of 30; the default is 30 FPS. Requested TPS, measured TPS, and render FPS are separate.
 
-Each NNUE receives a sparse 5x5 neighborhood encoded as one active feature per square:
+- Mouse wheel: zoom; middle mouse or Pan: move the camera.
+- Inspect: select an organism and inspect physiology, sensory inputs, neural outputs, mutations, ancestry, and decomposition totals.
+- **F**: follow/release the selected organism; **G**: family highlights; **C**: compact follow card; **D**: follow a surviving descendant after death.
+- **A**: open/close the Evolution Atlas, with timelines, species, ancestry, and ecological summaries.
+- **F5 / F9**: quicksave/load; hold Shift to choose the archive path.
+- World tools paint resources, terrain, and nutrients. Overlays expose resources, productivity, climate, species, nutrients, and decomposition.
 
-- empty space
-- food
-- walls
-- its own body
-- other organisms
-- map boundaries
+Observation and analytical species labels never command movement or change simulation randomness. Save archives preserve world state, neural genomes, lineage, Atlas history, and follow preferences; session decision history remains transient.
 
-Killer cells have their own danger feature rather than being grouped with ordinary organisms. Two additional one-hot pairs encode hunger/reproduction readiness and damage. Outputs represent up, down, left, right, and wait. Only changed features update the hidden accumulator.
+Settings and bounded diagnostic logs live under `%LOCALAPPDATA%\LFE-NNUE`. Nothing is transmitted automatically.
 
-NNUEs exist only on organisms containing a mover cell. Static organisms use the original Life Engine rules without allocating or evaluating a neural network. The founding organism is the original three-cell body: one central mouth and two diagonal producers.
+## Headless validation and performance
 
-## Learned flocking and neural evolution
+[Headless controls](native/HEADLESS.md) exercise the real simulation, camera, follow UI, and Skia renderer in memory without opening windows or sending desktop input. [UI latency results](native/UI_LATENCY.md) and [regular-game performance results](native/FOLLOW_PERFORMANCE.md) report measured timings and limitations.
 
-Flocking is not implemented with Boids rules or movement overrides. The NNUE input identifies nearby mover organisms and their headings, plus the current organism's own heading. TypeScript training teaches two examples through the network weights:
+Build the optional benchmark executables with:
 
-- move toward more distant movers (cohesion)
-- match the heading of close movers (alignment)
+```powershell
+cmake --build native/build-follow --target life_engine_native_benchmark life_engine_ecology_benchmark -j 4
+```
 
-The same policy continues to seek food and treats killer avoidance as higher priority in mixed scenes. The trainer's verification set currently scores 24/24 food seeking, 24/24 killer avoidance, 24/24 mixed-scene avoidance, and 96/96 flocking decisions.
+The throughput benchmark holds population fixed; the ecology benchmark runs full lifecycle ticks twice and checks deterministic state, resources, births, deaths, species, and history. Regular-game and UI scripts additionally exercise naturally growing plants and evolving populations. Performance validation is deferred when Battery Saver is enabled or battery charge falls below 30%.
 
-Mover offspring deep-copy their parent's NNUE. Neural mutation occurs independently from body mutation using a heritable, self-mutating neural mutation rate, so successful movement strategies spread through normal reproduction while new strategies continue to emerge. There is no explicit fitness function in the live ecosystem: survival and reproductive success remain the selection pressure.
+## Windows release
 
-## Cell palette
-
-The original cell colors are preserved: green food, orange mouths, white producers, blue movers, red killers, purple armor, gray walls, and a dark-blue world.
-
-## Evolution Observatory
-
-Choose the Inspect tool and click any living organism to open its observatory record. The panel shows:
-
-- its persistent creature ID, generation, life state, age, body size, food, and damage
-- its complete ancestor chain and all recorded descendants
-- body, movement, birth-distance, neural-weight, and neural-mutation-rate changes
-- respiratory stress, death cause, and inherited oxygen-tolerance, recovery, and frailty genes
-- the live sparse 5x5 sensory input seen by mover organisms
-- all five NNUE output probabilities and the selected action
-
-Ancestors and descendants are clickable, and lineage records remain inspectable after an organism dies. Resetting the world intentionally begins a new lineage archive.
-
-## Rich ecology and performance
-
-Seeded worlds now have separate terrain, organism, resource, and quantity layers. Fertile land, plains, deserts, water, and mountains interact with seasons. Plant, scavenger, and mineral mouths occupy distinct niches; fixed-point energy drives metabolism and reproduction, minerals gate combat tissue, deaths leave carrion, and killer/armor durability wears into inert tissue.
-
-The native world is flat 2D. Water and mountains are impassable; terrain, resources, nutrients, seasons, inherited physiology, and the five NNUE movement actions remain active. Elevation, caves, bridges, projected weather, and downhill drainage have been removed. Older version 1/2 saves still load: their cave/bridge passages become ordinary traversable land, and retired depth controls/history are cleared.
-
-Native controls queue simulation work on the coordinator instead of waiting for the physics lock. The UI presents input-driven changes immediately, frame pacing runs off the UI thread, and Atlas views consume immutable snapshots. TPS supports continuous slider dragging; the default render cap remains 30 FPS.
-
-Select a creature and click **Follow** or press **F** for a smooth, border-wrapping organism camera. **G** toggles family highlights (gold watched organism, cyan dashed children, violet dotted later descendants), **C** toggles a compact recording card, and **[ / ]** browse up to 128 captured neural decisions. The full card decodes the creature's actual decision-time sensory inputs, labels disabled modalities, and displays the five neural output scores and chosen action. Small windows use the compact card automatically so it does not cover the creature. Panning releases the camera; zooming retains following; opening the Atlas suspends camera animation. When the creature dies, the camera holds its final view and shows its cause of death. Click **Descendant** or press **D** to continue with the oldest living child, otherwise the oldest living descendant. Existing cell colors and NNUE movement authority are unchanged.
-
-Version 2 saves retain follow preferences and offspring counters; version 1 saves continue to load with following disabled. Legacy offspring counts reconstructed from retained lineage are labeled as a lower bound. Decision history is session-only and resumes with the next inference after loading. Native [headless controls](native/HEADLESS.md) can drive the simulation and renderer, export PNG/JSON artifacts, and test these controls without creating windows or touching desktop input. The completed follow-camera development build is `native/build-follow/life_engine.exe`.
-
-Completed ticks are published through three reusable render buffers, including watched-creature diagnostics. The renderer swaps in immutable completed state instead of competing with the live physics lock. Family boundaries update when ownership or family membership changes, and cached text uses the same Arial glyphs and sizes as the uncached path. Headless reports distinguish render rate from the rate of new simulation ticks actually drawn.
-
-Use **F5** (or **Save**) to save and **F9** (or **Load**) to resume the complete world. **Shift+F5** and **Shift+F9** open file pickers for named worlds. Quicksaves live in `%LOCALAPPDATA%/LFE-NNUE/world.lfesave`; the previous successful save is retained as `.bak`. Versioned native Windows archives include all world layers, soil moisture, organisms and lineage, shared neural weights and exact accumulators, random-generator state, physiology, atmosphere, counters, species, timeline/events, and camera/controls. Saves run off the UI thread, briefly holding the simulation at a consistent tick while the last render snapshot remains available. Loading validates the archive checksum and builds a replacement world before committing it; a rejected load leaves the active world intact. The published v1.0.0 package is independent of this local development build.
-
-The native ecology also has a persistent fixed-point soil-nutrient layer. Decomposer mouths consume carrion for less immediate energy than scavengers, release nutrients into surrounding soil, and contribute a small amount of CO₂. Nutrients diffuse and decay at coarse deterministic intervals, obey terrain capacity, recover slowly, and are consumed by plant production. Nutrient and Decomposition overlays, a nutrient painting tool, Observatory lifetime totals, and Atlas nutrient-cycle events make the loop visible without introducing scripted steering.
-
-Perception radius and channel masks are heritable, including optional soil-nutrient and carrion-density modalities. Brain schema v4 appends these inputs after the complete v3 topology, initializes every new weight to zero, and preserves legacy NNUE outputs. Larger sensory workloads cost energy and reduce decision cadence under a hard inference budget, while movement remains exclusively NNUE-directed.
-
-Atmospheric pressure suppresses reproduction before it becomes lethal. Respiratory stress accumulates separately for each organism from its genes, age, energy, temperature, and body size; the deterministic mortality queue can remove at most one critically stressed organism every ten simulation ticks.
-
-## Evolution Atlas
-
-Press **A** or click **ATLAS** to open native long-run analytics without pausing the simulation. The Timeline tab preserves 24,000 sixty-tick samples with population, resource, atmosphere, physiology, and death-rate history plus deterministic season, peak, crash, recovery, shortage, speciation, extinction, and regeneration markers. The Species table selects representatives, the Tree follows species ancestry, and Ecology summarizes the current resource and population balance. Cycle the world overlay to **Species** to color living organisms by their analytical species; this never changes NNUE inputs or physics.
-
-Species are classified every 300 ticks from rotation-normalized bodies, diet, perception, physiology, behavior genes, and cached NNUE signatures. IDs persist across scans, extinctions remain inspectable, and retained history is bounded. Reset Life confirms before clearing the run history; New Seeded World keeps the history and adds a regeneration marker.
-
-The TypeScript worker uses shared copy-on-write genomes, batched climate rows, renderer acknowledgements, and movement fast paths. `npm run benchmark` runs its strict 10k-at-60-TPS gate. If that gate fails, the optional Nim backend compiles directly to JavaScript—without Wasm or Emscripten:
-
-~~~sh
-npm run build:nim
-npm run benchmark:nim
-~~~
-
-## Native C++ application
-
-The dependency-free Windows build uses C++23, Win32, GDI, a fixed-step 60 TPS loop, seeded terrain/resources, 10,000 neural organisms, energy metabolism, and click-to-inspect telemetry. Build it with MinGW GCC:
-
-~~~sh
-cmake -S native -B native/build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
-cmake --build native/build -j 4
-~~~
-
-Run `native/build/life_engine.exe` to launch the native Win32/Skia application. The renderer, controls, simulation, NNUEs, Atlas, and observatory run in native code; no WebView is used. The renderer DLL is embedded as a verified fallback, so the packaged `LFE-NNUE.exe` is standalone. `life_engine_webview_legacy.exe` is retained only as an excluded legacy target.
-
-Create the tested v1.0.0 Windows release, checksum, and standalone ZIP with:
-
-~~~powershell
+```powershell
 powershell -ExecutionPolicy Bypass -File scripts/package-native-release.ps1
-~~~
+```
 
-The packager rebuilds the native target, runs deterministic tests, stages the executable without a sidecar DLL, runs its headless embedded-renderer self-test, and only then writes `dist/LFE-NNUE-v1.0.0-win64.zip`. Release notes include system requirements, controls, diagnostic paths, and known limits.
+The packager builds and tests native code, verifies the embedded renderer headlessly, and writes a standalone ZIP and SHA-256 checksum under `dist/`. See [release notes](RELEASE_NOTES.md) for requirements and diagnostic paths.
 
-The two native benchmark gates deliberately answer different questions:
-
-~~~sh
-native/build/life_engine_native_benchmark.exe 60
-native/build/life_engine_ecology_benchmark.exe 12000
-~~~
-
-The first holds lifecycle population fixed and measures throughput. The second runs a fixed number of full-ecology ticks twice and checks deterministic state, births, deaths, resources, timeline bounds, and species history.
+Historical non-TypeScript assets and the excluded WebView launcher are retained outside the supported native build; this cleanup does not remove old release/reference data or generated build directories.
