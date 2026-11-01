@@ -24,7 +24,7 @@ For the latest source build, follow [Build from source](#build-from-source).
 4. Press **A** to explore population history, species, ancestry, and ecological summaries.
 5. Paint terrain or resources to change the environment, then observe which traits persist. Save a world before experimenting if you want to return to it.
 
-The world is flat, **1024 × 640 cells**, and wraps at its borders. Water and mountains are impassable.
+The world is flat, **1024 × 640 cells**, and wraps at its borders. Zooming out shows one world, with empty space around it rather than repeated copies—even after following a creature. Water and mountains are impassable.
 
 ## Controls
 

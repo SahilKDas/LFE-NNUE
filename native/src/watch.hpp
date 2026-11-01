@@ -29,6 +29,23 @@ inline std::string senseLabel(const DecodedSense& cell){
 }
 inline int wrapCoordinate(int value,int size){return (value%size+size)%size;}
 inline double nearestWrapped(double value,double reference,double size){return value+std::round((reference-value)/size)*size;}
+// One finite world period per axis, even when the camera uses unwrapped
+// coordinates. Close views can cross the seam; wide views expose blank margins.
+struct WorldViewAxis {
+  double offset,zoom;int size,viewport,first,begin,end;bool wrapped;
+  WorldViewAxis(int worldSize,int viewportSize,double scale,double camera,bool wrap)
+    :offset(camera),zoom(scale),size(worldSize),viewport(std::max(0,viewportSize)),wrapped(wrap){
+    first=wrapped?int(std::floor((viewport*.5-offset)/zoom-size*.5)):0;
+    begin=std::clamp(int(std::ceil(offset+first*zoom)),0,viewport);
+    end=std::clamp(int(std::ceil(offset+(first+size)*zoom)),0,viewport);
+  }
+  int sample(int pixel)const{
+    if(pixel<begin||pixel>=end)return -1;
+    const int cell=int(std::floor((pixel-offset)/zoom));
+    if(cell<first||cell>=first+size)return -1;
+    return wrapped?wrapCoordinate(cell,size):cell;
+  }
+};
 struct FollowCamera {
   bool following{},wrapped{};int target{-1};double anchorX{},anchorY{},offsetX{},offsetY{};
   void begin(int id,double x,double y,double cameraX,double cameraY,double zoom,double viewportWidth,double viewportHeight){target=id;following=wrapped=true;anchorX=nearestWrapped(x,(viewportWidth*.5-cameraX)/zoom,WorldWidth);anchorY=nearestWrapped(y,(viewportHeight*.5-cameraY)/zoom,WorldHeight);offsetX=cameraX;offsetY=cameraY;}

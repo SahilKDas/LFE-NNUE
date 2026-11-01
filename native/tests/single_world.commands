@@ -1,0 +1,46 @@
+# One rendered world after follow, release, pan, zoom, resize and archive restore.
+resize 1920 1080
+seed 1000
+select family
+follow
+exchange on
+step 20
+zoom 0.2
+frame 30
+assert following on
+assert wrapped on
+assert single-world
+assert raster-coherent
+export headless/single-world-follow.png
+save headless/single-world.lfesave
+release
+pan 2400 -1700
+frame
+assert following off
+assert single-world
+load headless/single-world.lfesave
+frame 30
+assert following on
+assert single-world
+zoom 0.37
+frame 30
+assert single-world
+zoom 1.3
+frame 30
+assert single-world
+resize 960 640
+zoom 4
+frame 30
+assert single-world
+assert raster-coherent
+resize 1920 1080
+zoom 0.5
+release
+pan -6400 3800
+frame
+assert single-world
+export headless/single-world-released.png
+select family
+frame
+assert following off
+assert single-world
