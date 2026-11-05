@@ -1,5 +1,6 @@
 #pragma once
 #include "nnue.hpp"
+#include "research_types.hpp"
 #include "reference.hpp"
 #include "atlas.hpp"
 #include "watch.hpp"
@@ -16,20 +17,19 @@
 namespace life {
 enum class DeathCause : uint8_t { None, Starvation, Combat, OldAge, ThermalStress, Terrain, RespiratoryFailure };
 const char* deathCauseName(DeathCause cause);
-struct BodyCell { CellType type; int x, y; int durability{}; };
 struct OrganismLineage {
   int generation{},birthTick{},deathTick{-1},totalDescendants{},directOffspring{};
   bool offspringCountComplete{true};
   std::vector<std::string> mutations;std::string deathCause;
 };
 class LineageStorage {
-  std::unique_ptr<OrganismLineage> value_;
+  std::shared_ptr<OrganismLineage> value_;
 public:
   LineageStorage()=default;
-  LineageStorage(const LineageStorage& other){if(other.value_)value_=std::make_unique<OrganismLineage>(*other.value_);}
-  LineageStorage& operator=(const LineageStorage& other){if(this!=&other)value_=other.value_?std::make_unique<OrganismLineage>(*other.value_):nullptr;return *this;}
+  LineageStorage(const LineageStorage&)=default;
+  LineageStorage& operator=(const LineageStorage&)=default;
   LineageStorage(LineageStorage&&) noexcept=default;LineageStorage& operator=(LineageStorage&&) noexcept=default;
-  OrganismLineage* operator->(){if(!value_)value_=std::make_unique<OrganismLineage>();return value_.get();}
+  OrganismLineage* operator->(){if(!value_)value_=std::make_shared<OrganismLineage>();else if(!value_.unique())value_=std::make_shared<OrganismLineage>(*value_);return value_.get();}
   const OrganismLineage* operator->()const{static const OrganismLineage empty;return value_?value_.get():&empty;}
 };
 struct Organism {
@@ -53,10 +53,10 @@ struct Organism {
   int mutability{5};double neuralMutability{8};
   size_t activeIndex{};
   uint64_t brainGenomeId{};
-  int speciesId{-1};
+  int speciesId{-1};uint32_t bodyRevision{};
   uint64_t carrionConsumed{},nutrientsReleased{},decompositionEnergy{};
+  ResearchStorage research;
   LineageStorage lineage;
-  uint32_t bodyRevision{};
 };
 
 struct LineageSummary { int id{}, generation{}; bool alive{}; };
@@ -199,8 +199,38 @@ class NativeSimulation {
   void rebuildAtmosphereCounts();
   void updateNutrients();
   void archiveState(struct StateArchive& archive);
+  void archiveResearch(struct StateArchive& archive);
+  void saveArchive(const std::filesystem::path&,uint32_t,const std::filesystem::path&);
+  void loadArchive(const std::filesystem::path&,const std::filesystem::path&);
+  void recordCommand(SimulationCommand command);
+  bool recordingCommands_{true},initialized_{};uint64_t commandSequence_{},worldEpoch_{};
+  uint64_t runId_{},branchId_{1};Mulberry32 developmentRandom_{0x127a5u},diseaseRandom_{0x8f17cu};
+  std::vector<SimulationCommand> commands_;std::vector<JournalEntry> journal_;std::vector<ResearchEcology> researchTimeline_;
+  uint64_t journalSequence_{};int diseaseDeaths_{},lastDiseaseDeath_{-10},hatches_{},maturations_{};
+  std::array<std::vector<uint16_t>,2> signals_;std::array<std::vector<uint16_t>,2> signalScratch_;
+  std::vector<double> infectionPrepared_;
+
   void pruneLineage();
 public:
+  int width()const{return width_;}int height()const{return height_;}
+  size_t freezeBytes()const;
+  void executeCommand(SimulationCommand command){command.tick=ticks_;command.sequence=commandSequence_+1;applyCommand(command);}
+  std::shared_ptr<NativeSimulation> freeze(size_t budget=128u*1024u*1024u)const;
+  uint64_t stateDigest()const;
+  uint64_t worldEpoch()const{return worldEpoch_;}
+  uint64_t commandSequence()const{return commandSequence_;}
+  const std::vector<SimulationCommand>& commands()const{return commands_;}
+  void applyCommand(const SimulationCommand& command);
+  GenomeRecord genomeRecord(int id)const;
+  static GenomeComparison compareGenomes(const GenomeRecord& left,const GenomeRecord& right);
+  static void saveGenome(const GenomeRecord&,const std::filesystem::path&);
+  static GenomeRecord loadGenome(const std::filesystem::path&);
+  int introduceGenome(const GenomeRecord&,int x,int y,const std::string& artifact="");
+  void addJournal(JournalKind,int organism,const std::string& label,const std::string& evidence="");
+  const std::vector<JournalEntry>& journal()const{return journal_;}
+  const std::vector<ResearchEcology>& researchTimeline()const{return researchTimeline_;}
+  ResearchEcology researchEcology()const;
+  void researchIdentity(uint64_t run,uint64_t branch){runId_=run;branchId_=branch;}
   void profileTicks(bool enabled){profileTicks_=enabled;}
   void setParallelAnalysis(bool enabled){parallelAnalysis_=enabled;}
   TickWork tickWork() const{return tickWork_;}
@@ -208,6 +238,8 @@ public:
   FollowPreferences followPreferences;
   struct SavedView {float zoom{1},cameraX{},cameraY{};int overlay{},selectedOrganism{-1},fps{30},tps{60},atlasTab{},timelineWindow{600};bool weather{false},atlasOpen{},paused{};int tool{};uint32_t nextWorldSeed{2};bool habitatHistory{};} savedView;
   void save(const std::filesystem::path& path,uint32_t archiveVersion=3);
+  void saveCheckpoint(const std::filesystem::path& path,const std::filesystem::path& genomes){saveArchive(path,3,genomes);}
+  void loadCheckpoint(const std::filesystem::path& path,const std::filesystem::path& genomes){loadArchive(path,genomes);}
   void load(const std::filesystem::path& path);
   std::vector<uint8_t> cells;
   std::vector<int32_t> owners;

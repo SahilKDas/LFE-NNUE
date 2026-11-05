@@ -27,6 +27,11 @@ add_custom_command(TARGET life_engine POST_BUILD
     $<TARGET_FILE:life_engine>
     $<TARGET_FILE_DIR:life_engine>/life_engine_skia_preview.exe)
 if(BUILD_TESTING)
+  add_executable(life_engine_research_tests tests/research_tests.cpp src/research.cpp src/simulation.cpp src/atlas.cpp)
+  target_include_directories(life_engine_research_tests PRIVATE src)
+  target_compile_options(life_engine_research_tests PRIVATE -O2)
+  add_test(NAME native_research_suite COMMAND life_engine_research_tests)
+  set_tests_properties(native_research_suite PROPERTIES TIMEOUT 90)
   add_executable(life_engine_research_foundation_tests tests/research_foundation_tests.cpp src/simulation.cpp src/atlas.cpp)
   target_include_directories(life_engine_research_foundation_tests PRIVATE src)
   target_compile_options(life_engine_research_foundation_tests PRIVATE -O2)

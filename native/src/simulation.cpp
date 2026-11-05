@@ -6,6 +6,7 @@
 #include <chrono>
 #include "persistence.inc"
 #include "watch.inc"
+#include "research_engine.inc"
 
 namespace life {
 double genomeDistanceBounded(const GenomeDescriptor&,const GenomeDescriptor&,double);
@@ -20,7 +21,7 @@ NativeSimulation::NativeSimulation(int width, int height, double foodChance, int
     climateTemperature_(height),climateFertility_(height),climateGradient_(height),climateBand_(height),world(generateWorld(width, height, worldSeed)), cells(width * height), owners(width * height, -1) {regionColumns_=(width_+RegionSize-1)/RegionSize;regionRows_=(height_+RegionSize-1)/RegionSize;dirtyColumns_=(width_+DirtyTileSize-1)/DirtyTileSize;dirtyRows_=(height_+DirtyTileSize-1)/DirtyTileSize;regionBatches_.resize(regionColumns_*regionRows_);regionAwake_.resize(regionBatches_.size());regionNutrientTotals_.resize(regionBatches_.size());nutrientScratch_.resize(width_*height_);dirtyTiles_.resize(dirtyColumns_*dirtyRows_,1);dirtyVersions_.resize(dirtyTiles_.size(),1);for(auto& layer:dirtyLayerVersions_)layer.resize(dirtyTiles_.size(),1);organisms_.reserve(100'000);
   const size_t area=owners.size();nutrientResourceDirty_.resize(area);nutrientDecayRows_.resize(height_);soilResourceTileChanges_.resize(dirtyTiles_.size());soilNutrientTileChanges_.resize(dirtyTiles_.size());
   if(area>=262144){activeSlots_.reserve(100'000);slotById_.reserve(100'000);preparedPhysiology_.reserve(100'000);ownerSense_.reserve(100'000);bodyDigests_.reserve(100'000);classificationPairs_.reserve(100'000);speciesSlotById_.reserve(4096);classificationBuffer_.reserve(100'000);classificationDescriptors_.reserve(100'000);classificationJobs_.reserve(100'000);classificationMatches_.reserve(100'000);classificationCache_.begin(32768);pruneChildren_.reserve(100'000);pruneParents_.reserve(100'000);pruneSlotRemap_.reserve(100'000);pruneProtected_.reserve(100'000);pruneRemoved_.reserve(100'000);neuralMutationScratch_.reserve(InputSize*HiddenSize+HiddenSize+OutputSize*HiddenSize+OutputSize);}
-  reset(); }
+  reset();initialized_=true; }
 
 void NativeSimulation::updateClimateCache(){const double wave=std::sin(cyclePhase(ticks_)*std::numbers::pi*2.0),step=2.0/std::max(1,height_-1);const int direction=std::abs(wave*step)<.002?0:wave>0?-1:1;for(int y=0;y<height_;++y){const double latitude=1.0-2.0*y/std::max(1,height_-1),value=std::clamp(.5+.5*latitude*wave,0.0,1.0);climateTemperature_[y]=float(value);climateFertility_[y]=float(.35+value);climateGradient_[y]=int8_t(direction);climateBand_[y]=uint8_t(std::min(4,int(std::floor(value*5.0))));}}
 
@@ -67,6 +68,7 @@ void NativeSimulation::refreshCapabilities(Organism& organism) {
   if(organism.isMover&&!organism.brain){organism.brain=std::make_shared<Nnue>(random_,Nnue::DeferredInit{});organism.brainGenomeId=nextBrainGenomeId_++;}else if(!organism.isMover){organism.brain.reset();organism.brainGenomeId=0;}
 }
 void NativeSimulation::reset() {
+  ++worldEpoch_;commands_.clear();journal_.clear();researchTimeline_.clear();if(initialized_)recordCommand({0,0,CommandKind::Reset});
   watchedId_=-1;decisionCursor_=decisionCount_=0;familyRoot_=-2;familyRecords_=SIZE_MAX;familyRoles_.clear();followPreferences={};
   selectedSpeciesId_=-1;deathsByCause_.fill(0);sampledDeaths_.fill(0);sampledBirths_=0;nextSpeciesId_=1;lastSeason_=-1;lastPopulationPeak_=crashBaseline_=crashMinimum_=0;crashActive_=atmosphereEventActive_=false;resourceShortageRuns_.fill(0);resourceShortageActive_.fill(false);atlasRevision_=0;species_.clear();bodyDigests_.clear();speciesSlotById_.clear();classificationCache_.invalidate();timeline_.clear();evolutionEvents_.clear();classificationBuffer_.clear();
   atmosphereCells_=atmosphereMovers_=atmosphereProducers_=0;reproductionEnabled_=mortalityEnabled_=true;populationTarget_=0;births_=respiratoryDeaths_=0;carrionProcessed_=sampledCarrionProcessed_=plantProduced_=sampledPlantProduced_=0;lastRespiratoryDeathTick_=-10;atmosphericOxygen_=.21;carbonDioxide_=.0004;selectedId_=-1;deadCount_=0;std::fill(cells.begin(),cells.end(),uint8_t(CellType::Empty));std::fill(owners.begin(),owners.end(),-1);organisms_.clear();slotById_.clear();activeSlots_.clear();respiratoryCandidates_.clear();ticks_=0;++resets_;markAllDirty();
@@ -80,7 +82,7 @@ void NativeSimulation::regenerate(uint32_t seed) {
   worldSeed_ = seed;
   world = generateWorld(width_, height_, worldSeed_);
   reset();
-  timeline_=std::move(preservedTimeline);species_=std::move(preservedSpecies);speciesSlotById_.clear();for(size_t index=0;index<species_.size();++index)speciesSlotById_[species_[index].id]=index;evolutionEvents_=std::move(preservedEvents);nextSpeciesId_=preservedNextSpecies;atlasRevision_=preservedRevision;addEvolutionEvent(EvolutionEventType::Regeneration,-1,float(seed),"World regenerated from seed "+std::to_string(seed));
+  timeline_=std::move(preservedTimeline);species_=std::move(preservedSpecies);speciesSlotById_.clear();for(size_t index=0;index<species_.size();++index)speciesSlotById_[species_[index].id]=index;evolutionEvents_=std::move(preservedEvents);nextSpeciesId_=preservedNextSpecies;atlasRevision_=preservedRevision;addEvolutionEvent(EvolutionEventType::Regeneration,-1,float(seed),"World regenerated from seed "+std::to_string(seed));recordCommand({0,ticks_,CommandKind::Regenerate,0,0,int(seed)});
 }
 
 int NativeSimulation::seedBenchmarkMovers(int count) {
@@ -117,7 +119,7 @@ bool NativeSimulation::paintTerrain(int x, int y, TerrainType terrain) {
     world.resources[index] = uint8_t(ResourceType::None);if(terrain==TerrainType::Water||terrain==TerrainType::Mountain)world.nutrients[index]=0;else world.nutrients[index]=uint16_t(std::min<int>(world.nutrients[index],terrain==TerrainType::Fertile?2400:terrain==TerrainType::Plains?1600:500));
     world.resourceAmount[index] = 0;
   }
-  markDirtyIndex(index);
+  markDirtyIndex(index);recordCommand({0,ticks_,CommandKind::Terrain,x,y,int(terrain)});
   return true;
 }
 
@@ -126,10 +128,10 @@ bool NativeSimulation::paintResource(int x, int y, ResourceType resource, uint16
   if (index < 0) return false;
   world.resources[index] = uint8_t(resource);
   world.resourceAmount[index] = resource == ResourceType::None ? 0 : amount;
-  markDirtyIndex(index,2);
+  markDirtyIndex(index,2);recordCommand({0,ticks_,CommandKind::Resource,x,y,int(resource),int(amount)});
   return true;
 }
-bool NativeSimulation::paintNutrients(int x,int y,uint16_t amount){const int index=safeIndex(x,y);if(index<0)return false;const auto terrain=TerrainType(world.terrain[index]);if(terrain==TerrainType::Water||terrain==TerrainType::Mountain)return false;const int capacity=terrain==TerrainType::Fertile?2400:terrain==TerrainType::Plains?1600:500;world.nutrients[index]=uint16_t(std::min<int>(amount,capacity));markDirtyIndex(index,4);return true;}
+bool NativeSimulation::paintNutrients(int x,int y,uint16_t amount){const int index=safeIndex(x,y);if(index<0)return false;const auto terrain=TerrainType(world.terrain[index]);if(terrain==TerrainType::Water||terrain==TerrainType::Mountain)return false;const int capacity=terrain==TerrainType::Fertile?2400:terrain==TerrainType::Plains?1600:500;world.nutrients[index]=uint16_t(std::min<int>(amount,capacity));markDirtyIndex(index,4);recordCommand({0,ticks_,CommandKind::Nutrients,x,y,0,int(amount)});return true;}
 
 const Organism* NativeSimulation::organismAt(int x, int y) const {
   const int index = safeIndex(x, y);

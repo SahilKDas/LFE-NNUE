@@ -24,6 +24,7 @@ public:
 private:
   std::vector<Entry> entries_;uint32_t epoch_{};size_t used_{};
 public:
+  size_t storageBytes()const{return entries_.size()*sizeof(Entry);}
   void invalidate(){used_=0;if(++epoch_==0){for(auto& entry:entries_)entry.epoch=0;epoch_=1;}}
   void begin(size_t organisms,bool reuse=false){size_t count=16;while(count<organisms*4)count*=2;if(entries_.size()<count){entries_.assign(count,{});epoch_=1;used_=0;}else if(!reuse||used_+organisms>=entries_.size()*3/4)invalidate();}
   Entry& query(GenomeDescriptor key){
