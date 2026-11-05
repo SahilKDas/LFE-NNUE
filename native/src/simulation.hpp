@@ -207,7 +207,7 @@ public:
   WorldLayers world;
   FollowPreferences followPreferences;
   struct SavedView {float zoom{1},cameraX{},cameraY{};int overlay{},selectedOrganism{-1},fps{30},tps{60},atlasTab{},timelineWindow{600};bool weather{false},atlasOpen{},paused{};int tool{};uint32_t nextWorldSeed{2};bool habitatHistory{};} savedView;
-  void save(const std::filesystem::path& path,uint32_t archiveVersion=2);
+  void save(const std::filesystem::path& path,uint32_t archiveVersion=3);
   void load(const std::filesystem::path& path);
   std::vector<uint8_t> cells;
   std::vector<int32_t> owners;

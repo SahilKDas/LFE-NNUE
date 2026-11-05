@@ -7,7 +7,7 @@
 #include <stdexcept>
 namespace life {
 struct StateArchive {
-  std::iostream& stream; bool reading;
+  std::iostream& stream; bool reading;uint32_t version{3};
   uint64_t checksum=1469598103934665603ULL;
   void bytes(char* data,size_t size){if(reading)stream.read(data,size);else stream.write(data,size);if(!stream)throw std::runtime_error("Incomplete simulation archive");for(size_t i=0;i<size;++i){checksum^=uint8_t(data[i]);checksum*=1099511628211ULL;}}
   template<class T> void operator()(T& value) {

@@ -12,6 +12,7 @@
 #include <memory_resource>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 
 namespace life {
 enum SenseChannel : uint16_t { Occupancy=1, Heading=2, Danger=4, Resources=8, Terrain=16, Temperature=32, Fertility=64, Internal=128, CarrionDensity=256, SoilNutrients=512 };
@@ -28,12 +29,21 @@ inline Perception clampPerception(int radius, int channels) {
 class Nnue {
   friend class NativeSimulation;
   friend struct NativeSimulationTestAccess;
+public:
   struct alignas(64) InputRow : std::array<float,HiddenSize> {bool operator==(const InputRow&) const=default;};
+  struct Weights {
+    std::vector<InputRow> input;
+    std::array<float,HiddenSize> hidden{};
+    std::array<std::array<float,HiddenSize>,OutputSize> output{};
+    std::array<float,OutputSize> bias{};
+    bool operator==(const Weights&) const=default;
+  };
+private:
   static_assert(sizeof(InputRow)==HiddenSize*sizeof(float));
-  std::vector<InputRow> inputWeights;
-  std::array<float, HiddenSize> hiddenBias{}, accumulator{};
-  std::array<std::array<float, HiddenSize>, OutputSize> outputWeights{};
-  std::array<float, OutputSize> outputBias{}, output{};
+  std::shared_ptr<Weights> weights_=std::make_shared<Weights>();
+  std::array<float,HiddenSize> accumulator{};
+  std::array<float,OutputSize> output{};
+  void ownWeights(){if(!weights_.unique())weights_=std::make_shared<Weights>(*weights_);}
   std::vector<uint16_t> active;
   mutable uint64_t signatureCache_{};
   bool outputValid_{};
@@ -44,15 +54,15 @@ class Nnue {
   }
   static float weight(Mulberry32& random, double scale) { return float((random() * 2.0 - 1.0) * scale); }
   void apply(int feature, float sign) {
-    if (feature < 0 || feature >= int(inputWeights.size())) return;
+    if (feature < 0 || feature >= int(weights_->input.size())) return;
     for (int hidden = 0; hidden < HiddenSize; ++hidden)
-      accumulator[hidden] = float(accumulator[hidden] + sign * inputWeights[feature][hidden]);
+      accumulator[hidden] = float(accumulator[hidden] + sign * weights_->input[feature][hidden]);
   }
   inline static bool wideEnabled_=true;
   __attribute__((target("avx2"),always_inline)) void applyWide(int feature,float sign){
-    if(feature<0||feature>=int(inputWeights.size()))return;
+    if(feature<0||feature>=int(weights_->input.size()))return;
     const auto factor=_mm256_set1_ps(sign);
-    for(int hidden=0;hidden<HiddenSize;hidden+=8){const auto old=_mm256_loadu_ps(accumulator.data()+hidden),weights=_mm256_loadu_ps(inputWeights[feature].data()+hidden);_mm256_storeu_ps(accumulator.data()+hidden,_mm256_add_ps(old,_mm256_mul_ps(factor,weights)));}
+    for(int hidden=0;hidden<HiddenSize;hidden+=8){const auto old=_mm256_loadu_ps(accumulator.data()+hidden),weights=_mm256_loadu_ps(weights_->input[feature].data()+hidden);_mm256_storeu_ps(accumulator.data()+hidden,_mm256_add_ps(old,_mm256_mul_ps(factor,weights)));}
   }
 
 public:
@@ -64,13 +74,13 @@ public:
     if(changes.empty()){const auto index=uint32_t(random()*OutputSize);changes.push_back({InputSize*HiddenSize+HiddenSize+OutputSize*HiddenSize+index,weight(random,magnitude)});}
   }
   void applyMutation(const std::vector<MutationChange>& changes){
-    materialize();for(const auto& change:changes){uint32_t index=change.index;float* value;
-      if(index<InputSize*HiddenSize)value=&inputWeights[index/HiddenSize][index%HiddenSize];
-      else if((index-=InputSize*HiddenSize)<HiddenSize)value=&hiddenBias[index];
-      else if((index-=HiddenSize)<OutputSize*HiddenSize)value=&outputWeights[index/HiddenSize][index%HiddenSize];
-      else value=&outputBias[index-OutputSize*HiddenSize];
+    materialize();ownWeights();for(const auto& change:changes){uint32_t index=change.index;float* value;
+      if(index<InputSize*HiddenSize)value=&weights_->input[index/HiddenSize][index%HiddenSize];
+      else if((index-=InputSize*HiddenSize)<HiddenSize)value=&weights_->hidden[index];
+      else if((index-=HiddenSize)<OutputSize*HiddenSize)value=&weights_->output[index/HiddenSize][index%HiddenSize];
+      else value=&weights_->bias[index-OutputSize*HiddenSize];
       *value=float(*value+change.delta);
-    }active.clear();accumulator=hiddenBias;signatureCache_=0;outputValid_=false;
+    }active.clear();accumulator=weights_->hidden;signatureCache_=0;outputValid_=false;
   }
   struct DeferredInit {};
   Nnue(Mulberry32& random,DeferredInit):deferredSeed_(random.checkpoint()){
@@ -78,22 +88,27 @@ public:
     random.restore(random.checkpoint()+uint32_t(draws*0x6d2b79f5u));
   }
   void materialize(){if(!deferredSeed_)return;Mulberry32 random(*deferredSeed_);deferredSeed_.reset();Nnue initialized(random);*this=std::move(initialized);}
-  explicit Nnue(Mulberry32& random) : inputWeights(InputSize), active() {
+  explicit Nnue(Mulberry32& random) {
+    weights_->input.resize(InputSize);
     for (int input = 0; input < InputSize; ++input)
-      for (float& value : inputWeights[input]) value = trainedFeature(input) ? weight(random, .12) : 0.0f;
-    for (float& value : hiddenBias) value = weight(random, .05);
-    for (auto& row : outputWeights) for (float& value : row) value = weight(random, .18);
-    for (float& value : outputBias) value = weight(random, .05);
-    accumulator = hiddenBias;
+      for (float& value : weights_->input[input]) value = trainedFeature(input) ? weight(random, .12) : 0.0f;
+    for (float& value : weights_->hidden) value = weight(random, .05);
+    for (auto& row : weights_->output) for (float& value : row) value = weight(random, .18);
+    for (float& value : weights_->bias) value = weight(random, .05);
+    accumulator = weights_->hidden;
   }
   Nnue(Nnue&&)=default;Nnue& operator=(Nnue&&)=default;
-  Nnue(const Nnue& source){const_cast<Nnue&>(source).materialize();inputWeights=source.inputWeights;hiddenBias=source.hiddenBias;accumulator=source.hiddenBias;outputWeights=source.outputWeights;outputBias=source.outputBias;signatureCache_=source.signatureCache_;}
+  Nnue(const Nnue& source){const_cast<Nnue&>(source).materialize();weights_=source.weights_;accumulator=weights_->hidden;signatureCache_=source.signatureCache_;}
+  std::shared_ptr<const Weights> genome()const{const_cast<Nnue*>(this)->materialize();return weights_;}
+  std::shared_ptr<Nnue> cloneRuntime()const{auto result=std::make_shared<Nnue>(*this);result->accumulator=accumulator;result->output=output;result->active=active;result->outputValid_=outputValid_;return result;}
+  static std::shared_ptr<Nnue> fromGenome(std::shared_ptr<const Weights> genome){if(!genome||genome->input.size()!=InputSize)throw std::runtime_error("Invalid genome topology");Mulberry32 seed(0);auto result=std::make_shared<Nnue>(seed,DeferredInit{});result->deferredSeed_.reset();result->weights_=std::const_pointer_cast<Weights>(genome);result->accumulator=genome->hidden;return result;}
+
   void mutate(Mulberry32& random, double probability=.03, double magnitude=.2) {
-    materialize();
+    materialize();ownWeights();
     bool changed=false;const auto perturb=[&](float& value){if(random()<probability){value=float(value+weight(random,magnitude));changed=true;}};
-    for(auto& row:inputWeights)for(float& value:row)perturb(value);for(float& value:hiddenBias)perturb(value);for(auto& row:outputWeights)for(float& value:row)perturb(value);for(float& value:outputBias)perturb(value);
-    if(!changed){const int index=int(std::floor(random()*OutputSize));outputBias[index]=float(outputBias[index]+weight(random,magnitude));}
-    active.clear();accumulator=hiddenBias;signatureCache_=0;outputValid_=false;
+    for(auto& row:weights_->input)for(float& value:row)perturb(value);for(float& value:weights_->hidden)perturb(value);for(auto& row:weights_->output)for(float& value:row)perturb(value);for(float& value:weights_->bias)perturb(value);
+    if(!changed){const int index=int(std::floor(random()*OutputSize));weights_->bias[index]=float(weights_->bias[index]+weight(random,magnitude));}
+    active.clear();accumulator=weights_->hidden;signatureCache_=0;outputValid_=false;
   }
   // Reserve precisely the mutation's random stream before placement is known.
   // Failed births need neither a genome allocation nor writes to 100+ KB of weights.
@@ -103,8 +118,8 @@ public:
     for(int index=0;index<values;++index)if(random()<probability){(void)random();changed=true;}
     if(!changed){(void)random();(void)random();}
   }
-  uint64_t signature() const {const_cast<Nnue*>(this)->materialize();std::atomic_ref<uint64_t> cache(signatureCache_);if(const auto cached=cache.load(std::memory_order_relaxed))return cached;uint64_t hash=1469598103934665603ULL;const auto add=[&](float value){hash^=std::bit_cast<uint32_t>(value);hash*=1099511628211ULL;};for(const auto& row:inputWeights)for(const float value:row)add(value);for(const float value:hiddenBias)add(value);for(const auto& row:outputWeights)for(const float value:row)add(value);for(const float value:outputBias)add(value);const auto value=hash?hash:1;cache.store(value,std::memory_order_relaxed);return value;}
-  bool featureRowZero(int feature) const {return feature>=0&&feature<int(inputWeights.size())&&std::all_of(inputWeights[feature].begin(),inputWeights[feature].end(),[](float value){return value==0;});}
+  uint64_t signature() const {const_cast<Nnue*>(this)->materialize();std::atomic_ref<uint64_t> cache(signatureCache_);if(const auto cached=cache.load(std::memory_order_relaxed))return cached;uint64_t hash=1469598103934665603ULL;const auto add=[&](float value){hash^=std::bit_cast<uint32_t>(value);hash*=1099511628211ULL;};for(const auto& row:weights_->input)for(const float value:row)add(value);for(const float value:weights_->hidden)add(value);for(const auto& row:weights_->output)for(const float value:row)add(value);for(const float value:weights_->bias)add(value);const auto value=hash?hash:1;cache.store(value,std::memory_order_relaxed);return value;}
+  bool featureRowZero(int feature) const {return feature>=0&&feature<int(weights_->input.size())&&std::all_of(weights_->input[feature].begin(),weights_->input[feature].end(),[](float value){return value==0;});}
   const std::array<float, OutputSize>& evaluateScalar(std::span<const uint16_t> features) {
     size_t oldIndex = 0, newIndex = 0;
     while (oldIndex < active.size() || newIndex < features.size()) {
@@ -116,9 +131,9 @@ public:
     }
     active.assign(features.begin(), features.end());
     for (int action = 0; action < OutputSize; ++action) {
-      double value = outputBias[action];
+      double value = weights_->bias[action];
       for (int hidden = 0; hidden < HiddenSize; ++hidden)
-        value += double(std::max(0.0f, accumulator[hidden])) * outputWeights[action][hidden];
+        value += double(std::max(0.0f, accumulator[hidden])) * weights_->output[action][hidden];
       output[action] = float(value);
     }
     outputValid_=true;return output;
@@ -135,9 +150,9 @@ public:
     }
     active.assign(features.begin(), features.end());
     for (int action = 0; action < OutputSize; ++action) {
-      double value = outputBias[action];
+      double value = weights_->bias[action];
       for (int hidden = 0; hidden < HiddenSize; ++hidden)
-        value += double(std::max(0.0f, accumulator[hidden])) * outputWeights[action][hidden];
+        value += double(std::max(0.0f, accumulator[hidden])) * weights_->output[action][hidden];
       output[action] = float(value);
     }
     outputValid_=true;return output;
@@ -148,8 +163,8 @@ public:
     if(outputValid_&&features.size()==active.size()&&std::equal(features.begin(),features.end(),active.begin()))return output;
     // Fetch independent rows together instead of stalling the accumulator chain
     // on each family's first cold row. Alignment keeps a row on one cache line.
-    for(const auto feature:features)if(feature<inputWeights.size())__builtin_prefetch(inputWeights[feature].data(),0,3);
-    for(const auto feature:active)if(feature<inputWeights.size())__builtin_prefetch(inputWeights[feature].data(),0,3);
+    for(const auto feature:features)if(feature<weights_->input.size())__builtin_prefetch(weights_->input[feature].data(),0,3);
+    for(const auto feature:active)if(feature<weights_->input.size())__builtin_prefetch(weights_->input[feature].data(),0,3);
     return wideEnabled_&&wideAvailable()?evaluateWide(features):evaluateScalar(features);}
   int action(std::span<const uint16_t> features) {
     const auto& scores = evaluate(features); int best = 0;

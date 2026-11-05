@@ -5,7 +5,7 @@
 #include <stdexcept>
 #include <unordered_set>
 namespace life {double genomeDistanceBounded(const GenomeDescriptor&,const GenomeDescriptor&,double);struct NativeSimulationTestAccess {
-  static bool brain(const Nnue& a,const Nnue& b){return std::tie(a.inputWeights,a.hiddenBias,a.accumulator,a.outputWeights,a.outputBias,a.output,a.active)==std::tie(b.inputWeights,b.hiddenBias,b.accumulator,b.outputWeights,b.outputBias,b.output,b.active);}
+  static bool brain(const Nnue& a,const Nnue& b){return std::tie(a.weights_->input,a.weights_->hidden,a.accumulator,a.weights_->output,a.weights_->bias,a.output,a.active)==std::tie(b.weights_->input,b.weights_->hidden,b.accumulator,b.weights_->output,b.weights_->bias,b.output,b.active);}
   static bool rng(const NativeSimulation& a,const NativeSimulation& b){return a.random_.checkpoint()==b.random_.checkpoint()&&a.nextId_==b.nextId_&&a.births_==b.births_&&a.deathsByCause_==b.deathsByCause_&&a.nextBrainGenomeId_==b.nextBrainGenomeId_;}
   static void smallHistory(NativeSimulation& s){s.lineageLimit_=5;}
   static void pruneFixture(NativeSimulation& s){const auto base=s.organisms_.front();for(int index=1;index<200;++index){auto dead=base;dead.id=index+1;dead.parentId=index/2+1;dead.living=false;dead.lineage->deathTick=10;dead.deathCauseCode=DeathCause::OldAge;dead.lineage->deathCause="Old age";s.slotById_[dead.id]=s.organisms_.size();s.organisms_.push_back(std::move(dead));}s.nextId_=201;s.deadCount_=199;s.lineageLimit_=30;s.selectedId_=30;s.watchedId_=90;}
