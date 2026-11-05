@@ -30,6 +30,9 @@ add_custom_command(TARGET life_engine POST_BUILD
     $<TARGET_FILE:life_engine>
     $<TARGET_FILE_DIR:life_engine>/life_engine_skia_preview.exe)
 if(BUILD_TESTING)
+  add_executable(life_engine_biology_tests tests/biology_tests.cpp)
+  target_link_libraries(life_engine_biology_tests PRIVATE life_engine_simulation)
+  add_test(NAME native_research_biology COMMAND life_engine_biology_tests)
   add_executable(life_engine_research_tests tests/research_tests.cpp)
   target_include_directories(life_engine_research_tests PRIVATE src)
   target_compile_options(life_engine_research_tests PRIVATE -O2)
@@ -42,6 +45,8 @@ if(BUILD_TESTING)
   add_executable(life_engine_ui_tests tests/ui_commands_tests.cpp)
   target_include_directories(life_engine_ui_tests PRIVATE src)
   add_test(NAME native_ui_commands COMMAND life_engine_ui_tests)
+  add_test(NAME native_research_headless COMMAND life_engine "--headless-script=${CMAKE_CURRENT_SOURCE_DIR}/tests/research_smoke.commands")
+  set_tests_properties(native_research_headless PROPERTIES TIMEOUT 120)
   add_test(NAME native_ui_headless COMMAND life_engine "--headless-script=${CMAKE_CURRENT_SOURCE_DIR}/tests/ui_smoke.commands")
   set_tests_properties(native_ui_headless PROPERTIES TIMEOUT 45)
   add_executable(life_engine_optimization_tests tests/optimization_tests.cpp)
@@ -78,3 +83,4 @@ foreach(engine_target life_engine life_engine_native_benchmark life_engine_ecolo
     target_link_libraries(${engine_target} PRIVATE life_engine_simulation)
   endif()
 endforeach()
+

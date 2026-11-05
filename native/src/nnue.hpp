@@ -15,14 +15,14 @@
 #include <stdexcept>
 
 namespace life {
-enum SenseChannel : uint16_t { Occupancy=1, Heading=2, Danger=4, Resources=8, Terrain=16, Temperature=32, Fertility=64, Internal=128, CarrionDensity=256, SoilNutrients=512 };
+enum SenseChannel : uint16_t { Occupancy=1, Heading=2, Danger=4, Resources=8, Terrain=16, Temperature=32, Fertility=64, Internal=128, CarrionDensity=256, SoilNutrients=512, SignalA=1024, SignalB=2048 };
 inline constexpr uint16_t DefaultSenseChannels = Occupancy | Heading | Danger | Resources | Internal | Temperature | Fertility;
 struct Perception { int radius; uint16_t channels; int cost; };
 inline Perception clampPerception(int radius, int channels) {
-  int safe = std::clamp(radius, 1, MaximumSensorRadius); uint16_t mask = uint16_t(channels & 1023);
+  int safe = std::clamp(radius, 1, MaximumSensorRadius); uint16_t mask = uint16_t(channels & 4095);
   const auto cost = [&] { return ((safe * 2 + 1) * (safe * 2 + 1) - 1) * std::max(1, std::popcount(mask)); };
   while (cost() > MaximumInferenceBudget && safe > 1) --safe;
-  for (int bit = 512; cost() > MaximumInferenceBudget && bit >= 1; bit >>= 1) if (mask & bit) mask &= uint16_t(~bit);
+  for (int bit = 2048; cost() > MaximumInferenceBudget && bit >= 1; bit >>= 1) if (mask & bit) mask &= uint16_t(~bit);
   return {safe, mask, cost()};
 }
 
@@ -67,10 +67,10 @@ private:
 
 public:
   struct MutationChange {uint32_t index;float delta;};
-  static void captureMutation(Mulberry32& random,std::vector<MutationChange>& changes,double probability=.03,double magnitude=.2){
-    constexpr uint32_t values=InputSize*HiddenSize+HiddenSize+OutputSize*HiddenSize+OutputSize;
+  static void captureMutation(Mulberry32& random,std::vector<MutationChange>& changes,double probability=.03,double magnitude=.2,int inputCount=InputSize){
+    const uint32_t values=inputCount*HiddenSize+HiddenSize+OutputSize*HiddenSize+OutputSize;
     if(changes.capacity()<values)changes.reserve(values);changes.clear();
-    for(uint32_t index=0;index<values;++index)if(random()<probability)changes.push_back({index,weight(random,magnitude)});
+    for(uint32_t index=0;index<values;++index)if(random()<probability)changes.push_back({index<inputCount*HiddenSize?index:index+uint32_t((InputSize-inputCount)*HiddenSize),weight(random,magnitude)});
     if(changes.empty()){const auto index=uint32_t(random()*OutputSize);changes.push_back({InputSize*HiddenSize+HiddenSize+OutputSize*HiddenSize+index,weight(random,magnitude)});}
   }
   void applyMutation(const std::vector<MutationChange>& changes){
@@ -118,7 +118,7 @@ public:
     for(int index=0;index<values;++index)if(random()<probability){(void)random();changed=true;}
     if(!changed){(void)random();(void)random();}
   }
-  uint64_t signature() const {const_cast<Nnue*>(this)->materialize();std::atomic_ref<uint64_t> cache(signatureCache_);if(const auto cached=cache.load(std::memory_order_relaxed))return cached;uint64_t hash=1469598103934665603ULL;const auto add=[&](float value){hash^=std::bit_cast<uint32_t>(value);hash*=1099511628211ULL;};for(const auto& row:weights_->input)for(const float value:row)add(value);for(const float value:weights_->hidden)add(value);for(const auto& row:weights_->output)for(const float value:row)add(value);for(const float value:weights_->bias)add(value);const auto value=hash?hash:1;cache.store(value,std::memory_order_relaxed);return value;}
+  uint64_t signature() const {const_cast<Nnue*>(this)->materialize();std::atomic_ref<uint64_t> cache(signatureCache_);if(const auto cached=cache.load(std::memory_order_relaxed))return cached;uint64_t hash=1469598103934665603ULL;const auto add=[&](float value){hash^=std::bit_cast<uint32_t>(value);hash*=1099511628211ULL;};for(size_t i=0;i<weights_->input.size();++i){const auto& row=weights_->input[i];if(i>=ResearchFeatureOffset&&std::all_of(row.begin(),row.end(),[](float v){return v==0;}))continue;for(const float value:row)add(value);}for(const float value:weights_->hidden)add(value);for(const auto& row:weights_->output)for(const float value:row)add(value);for(const float value:weights_->bias)add(value);const auto value=hash?hash:1;cache.store(value,std::memory_order_relaxed);return value;}
   bool featureRowZero(int feature) const {return feature>=0&&feature<int(weights_->input.size())&&std::all_of(weights_->input[feature].begin(),weights_->input[feature].end(),[](float value){return value==0;});}
   const std::array<float, OutputSize>& evaluateScalar(std::span<const uint16_t> features) {
     size_t oldIndex = 0, newIndex = 0;

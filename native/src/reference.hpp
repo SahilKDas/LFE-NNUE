@@ -11,11 +11,11 @@ inline constexpr int WorldWidth = 1024, WorldHeight = 640, ClimateCycleTicks = 2
 inline constexpr int EnergyScale = 1'000, StartEnergy = 12'000, PlantEnergy = 4'000, CarrionEnergy = 3'000, DecomposerEnergy = 1'500;
 inline constexpr int CellBaseCost = 2, MoveCost = 15, ProduceCost = 5, AttackCost = 120;
 inline constexpr int KillerDurability = 12, ArmorDurability = 18;
-inline constexpr int BrainSchemaVersion = 4, FeatureCategories = 20, PositionCount = 80;
-inline constexpr int HiddenSize = 16, OutputSize = 5, LegacyInputSize = 1'625, NutrientFeatureOffset = LegacyInputSize, CarrionDensityFeatureOffset = NutrientFeatureOffset + PositionCount, InputSize = CarrionDensityFeatureOffset + PositionCount;
+inline constexpr int BrainSchemaVersion = 5, FeatureCategories = 20, PositionCount = 80;
+inline constexpr int HiddenSize = 16, OutputSize = 5, LegacyInputSize = 1'625, NutrientFeatureOffset = LegacyInputSize, CarrionDensityFeatureOffset = NutrientFeatureOffset + PositionCount, ResearchFeatureOffset = CarrionDensityFeatureOffset + PositionCount, SignalAFeatureOffset = ResearchFeatureOffset, SignalBFeatureOffset = SignalAFeatureOffset + PositionCount*4, StageFeatureOffset = SignalBFeatureOffset + PositionCount*4, InfectionFeatureOffset = StageFeatureOffset + 3, InputSize = InfectionFeatureOffset + 5;
 inline constexpr int DefaultSensorRadius = 2, MaximumSensorRadius = 4, MaximumInferenceBudget = 400;
 
-enum class CellType : uint8_t { Empty, Food, Wall, Mouth, Producer, Mover, Killer, Armor, PlantMouth, ScavengerMouth, MineralMouth, Inert, DecomposerMouth };
+enum class CellType : uint8_t { Empty, Food, Wall, Mouth, Producer, Mover, Killer, Armor, PlantMouth, ScavengerMouth, MineralMouth, Inert, DecomposerMouth, Egg };
 enum class TerrainType : uint8_t { Plains, Fertile, Desert, Water, Mountain };
 enum class ResourceType : uint8_t { None, Plant, Carrion, Mineral };
 enum class Action : uint8_t { Up, Down, Left, Right, Wait };

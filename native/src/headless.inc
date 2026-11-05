@@ -82,13 +82,20 @@ bool headlessUiBenchmark(int seconds,const std::filesystem::path& path){
 }
 
 int runHeadlessScript(const std::filesystem::path& script){
-  std::ifstream input(script);const auto reportPath=std::filesystem::current_path()/"headless"/(script.filename().wstring()+L".report.json");std::filesystem::create_directories(reportPath.parent_path());int lineNumber=0,commands=0,familyRoot=-1;double markedX=0,markedY=0;bool performancePassed=true,performanceDeferred=false;std::string error;
+  std::ifstream input(script);const auto reportPath=std::filesystem::current_path()/"headless"/(script.filename().wstring()+L".report.json");std::filesystem::create_directories(reportPath.parent_path());int lineNumber=0,commands=0,familyRoot=-1;double markedX=0,markedY=0;bool performancePassed=true,performanceDeferred=false;uint64_t markedResearchDigest=0;std::string error;
   const auto require=[](bool value,const std::string& message){if(!value)throw std::runtime_error(message);};
   try{if(!input)throw std::runtime_error("Unable to open headless command script");std::string line;
     {const auto power=life::performancePowerState();if(!power.eligible()){std::ifstream scan(script);std::string candidate;bool performance=false;while(std::getline(scan,candidate)){std::istringstream parsed(candidate);std::string action;parsed>>action;if(action=="ui-play"||action=="play"||action=="benchmark"||action=="benchmark-sync"){performance=true;int duration{};std::string destination;parsed>>duration>>std::quoted(destination);if(!destination.empty())writePerformanceDeferral(destination,power);}}if(performance)throw std::runtime_error("Performance validation deferred before warm-up: "+power.reason());}}
     while(std::getline(input,line)){++lineNumber;std::istringstream command(line);std::string action;command>>action;if(action.empty()||action.front()=='#')continue;if(++commands>10000)throw std::runtime_error("Headless script exceeds 10,000 commands");
       const auto pathArgument=[&](){std::string value;command>>std::quoted(value);if(value.empty())throw std::runtime_error("Command requires a path");std::filesystem::path result(value);if(!result.parent_path().empty())std::filesystem::create_directories(result.parent_path());return result;};
-      if(action=="assert-ui-nonblocking"){
+      if(action=="research"){const auto path=pathArgument();researchSuite=std::make_unique<life::ResearchSuite>(path);researchSuite->attach(simulation);researchOpen=true;}
+      else if(action=="research-page"){std::string name;command>>name;const std::array<std::string,5> names{"history","experiments","genomes","journal","library"};const auto it=std::find(names.begin(),names.end(),name);require(it!=names.end(),"Unknown research page");researchPage=int(it-names.begin());researchOpen=true;researchFocus=-1;researchScroll=0;researchSelected=-1;}
+      else if(action=="research-field"){int field;std::string value;command>>field>>std::quoted(value);require(field>=0&&field<int(researchFields[researchPage].size()),"Invalid research field");researchFields[researchPage][size_t(field)].value=value;}
+      else if(action=="research-row")command>>researchSelected;
+      else if(action=="research-action"){int actionIndex;command>>actionIndex;require(researchSuite&&actionIndex>=0&&actionIndex<int(researchActions().size()),"Invalid research action");researchAction(actionIndex);}
+      else if(action=="research-wait"){require(bool(researchSuite),"Research not enabled");researchSuite->waitIdle();researchModelBoundary();uiCommands.complete();nextWatchDiagnostics={};++presentationContext;}
+      else if(action=="research-mark")markedResearchDigest=simulation.stateDigest();
+      else if(action=="assert-ui-nonblocking"){
         const auto oldTool=activeTool;const bool previousAsync=asynchronousUi;asynchronousUi=true;const auto prior=simulationUiCommand;
         {std::unique_lock held(simulationMutex);activeTool=Tool::Plant;applyTool(50,132);selectUi(-1);require(uiCommands.pending()&&simulationUiCommand==prior,"UI command ran while physics lock was held");}
         {std::unique_lock held(simulationMutex);uiCommands.execute();publishSimulationFrame(true);}uiCommands.complete();require(simulationUiCommand>prior&&!uiCommands.pending(),"UI commands did not complete");activeTool=oldTool;asynchronousUi=previousAsync;
@@ -105,7 +112,7 @@ int runHeadlessScript(const std::filesystem::path& script){
       else if(action=="overlay"){std::string value;command>>value;constexpr const char* names[]={"terrain","resources","productivity","climate","species","nutrients","decomposition"};int index=0;while(index<7&&value!=names[index])++index;require(index<7,"Unknown overlay");activeOverlay=Overlay(index);}
       else if(action=="pan"){double x{},y{};command>>x>>y;followCamera.release();cameraX+=float(x);cameraY+=float(y);}
       else if(action=="resize"){int width{},height{};command>>width>>height;require(width>=960&&width<=7680&&height>=640&&height<=4320,"Invalid headless viewport");headlessWidth=width;headlessHeight=height;}
-      else if(action=="step"){int count{};command>>count;require(count>=0&&count<=24000,"Step count must be 0..24000");simulation.step(count);nextWatchDiagnostics={};++presentationContext;}
+      else if(action=="step"){int count{};command>>count;require(count>=0&&count<=24000,"Step count must be 0..24000");for(int tick=0;tick<count;++tick){require(!researchSuite||!researchSuite->stopsSimulation(),"Research preview is read-only; create a branch or return to present");simulation.step();researchModelBoundary();}nextWatchDiagnostics={};++presentationContext;}
       else if(action=="frame"){int count=1;double milliseconds=1000./60;command>>count;if(!(command>>milliseconds))command.clear();require(count>=1&&count<=10000&&milliseconds>0&&milliseconds<=1000,"Invalid frame count or duration");headlessFrame(count,milliseconds);}
       else if(action=="nnue"){std::string mode;command>>mode;require(mode=="scalar"||mode=="auto","NNUE mode must be scalar or auto");life::Nnue::enableWide(mode=="auto");}
       else if(action=="history"){int offset{};command>>offset;require(offset>=0&&offset<128,"History offset must be 0..127");watchedHistoryOffset=size_t(offset);nextWatchDiagnostics={};}
@@ -118,7 +125,13 @@ int runHeadlessScript(const std::filesystem::path& script){
       else if(action=="mark-camera"){markedX=cameraX;markedY=cameraY;}
       else if(action=="benchmark"||action=="benchmark-sync"||action=="play"){int seconds{};command>>seconds;performancePassed=headlessBenchmark(seconds,pathArgument(),action!="benchmark-sync",action=="play")&&performancePassed;}
       else if(action=="assert"){std::string property,value;command>>property>>value;const auto watched=simulation.watchedSnapshot(watchedHistoryOffset);
-        if(property=="following")require(followCamera.following==(value=="on"),"Unexpected follow state");
+        if(property=="research-preview"){require(researchSuite&&researchSuite->preview()==(value=="on"),"Unexpected research preview state");}
+        else if(property=="research-genomes"){const auto snapshot=researchSuite->snapshot();require(snapshot->left&&snapshot->right,"Missing genome comparison");}
+        else if(property=="research-library-min")require(researchSuite->snapshot()->library.size()>=size_t(std::stoi(value)),"Missing library entries");
+        else if(property=="research-branches-min")require(researchSuite->snapshot()->branches.size()>=size_t(std::stoi(value)),"Missing experiment branches");
+        else if(property=="research-digest")require(simulation.stateDigest()==markedResearchDigest,"Research changed restored state");
+        else if(property=="research-budget"){const auto snapshot=researchSuite->snapshot();require(snapshot->memoryBytes<=128u*1024u*1024u&&snapshot->diskBytes<=2ULL*1024*1024*1024,"Research budget exceeded");}
+        else if(property=="following")require(followCamera.following==(value=="on"),"Unexpected follow state");
         else if(property=="alive")require(watched.pose.alive==(value=="on"),"Unexpected alive state");
         else if(property=="wrapped")require(followCamera.wrapped==(value=="on"),"Unexpected wrapped state");
         else if(property=="compact")require(compactFollow==(value=="on"),"Unexpected compact state");

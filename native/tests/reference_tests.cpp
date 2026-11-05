@@ -14,6 +14,7 @@
 
 namespace life {
 struct NativeSimulationTestAccess {
+  static void legacy(NativeSimulation& simulation){simulation.researchRules_=false;}
   static void atmosphere(NativeSimulation& simulation,double oxygen,double carbonDioxide){simulation.atmosphericOxygen_=oxygen;simulation.carbonDioxide_=carbonDioxide;}
   static void tick(NativeSimulation& simulation,int tick){simulation.ticks_=tick;}
   static void respiratoryMortality(NativeSimulation& simulation){simulation.processRespiratoryMortality();}
@@ -41,7 +42,7 @@ int main() {
   static_assert(int(life::CellType::Inert) == 11);
   static_assert(int(life::Action::Wait) == 4);
   static_assert(life::LegacyInputSize == life::PositionCount * life::FeatureCategories + 25);
-  static_assert(life::InputSize == life::LegacyInputSize + life::PositionCount * 2);
+  static_assert(life::ResearchFeatureOffset == life::LegacyInputSize + life::PositionCount * 2);
   life::Mulberry32 random(334462);
   const double expected[] = {0.023944327142089605, 0.84153357916511595, 0.60139716230332851, 0.56424767896533012, 0.24601307534612715, 0.67428731429390609, 0.79913979861885309, 0.17321427632123232};
   for (double value : expected) near(random(), value, 0.0, "Mulberry32 sequence differs from TypeScript");
@@ -88,7 +89,7 @@ int main() {
   {
     life::NativeSimulation health(32,20,.0,50'000,41,91);auto& founder=life::NativeSimulationTestAccess::organisms(health).front();life::NativeSimulationTestAccess::atmosphere(health,.06,.15);life::NativeSimulationTestAccess::update(health,founder);const double stressed=founder.hypoxiaStress;check(stressed>0&&founder.living,"respiratory stress did not accumulate gradually");life::NativeSimulationTestAccess::atmosphere(health,.21,.0004);life::NativeSimulationTestAccess::update(health,founder);check(founder.hypoxiaStress<stressed&&health.respiratoryDeathCount()==0,"healthy atmosphere did not recover stress without respiratory death");
   }
-  life::NativeSimulation simulation(96,60,.2,500,524114809,334462);
+  life::NativeSimulation simulation(96,60,.2,500,524114809,334462);life::NativeSimulationTestAccess::legacy(simulation);
   // Flat-world baselines exclude removed depth columns and elevation physiology.
   checkHash(simulation,"5226721e79e934bb6632da6883be2226c1d45dba15be0ad9e8aef600011b2430","native tick-0 whole-state hash mismatch");
   check(simulation.metrics().organisms==1&&simulation.metrics().averageEnergy==12.0,"native reset state mismatch");
@@ -112,9 +113,11 @@ int main() {
   simulation.step(900);
   if(simulation.metrics().organisms!=713){std::cerr<<"FAIL: native tick-1000 population mismatch (actual "<<simulation.metrics().organisms<<", expected 713)\n";++failures;}
   simulation.step(1'000);const auto toroidalMetrics=simulation.metrics();check(toroidalMetrics.organisms>0&&std::isfinite(toroidalMetrics.averageEnergy),"toroidal long-run ecology became invalid");check(toroidalMetrics.awakeRegions>0&&toroidalMetrics.awakeRegions+toroidalMetrics.sleepingRegions==6,"region sleep accounting mismatch");
-  life::NativeSimulation replay(96,60,.2,500,524114809,334462);replay.step(2'000);check(stateHash(replay)==stateHash(simulation),"toroidal simulation replay is not deterministic");check(replay.metrics().organisms==simulation.metrics().organisms&&replay.metrics().nnueEvaluations==simulation.metrics().nnueEvaluations,"toroidal replay metrics diverged");
+  life::NativeSimulation replay(96,60,.2,500,524114809,334462);life::NativeSimulationTestAccess::legacy(replay);replay.step(2'000);check(stateHash(replay)==stateHash(simulation),"toroidal simulation replay is not deterministic");check(replay.metrics().organisms==simulation.metrics().organisms&&replay.metrics().nnueEvaluations==simulation.metrics().nnueEvaluations,"toroidal replay metrics diverged");
   replay.takeDirtyTiles();check(replay.takeDirtyTiles().empty(),"dirty tiles were not drained");check(replay.paintResource(0,0,life::ResourceType::Plant,50)&&replay.takeDirtyTiles().size()==1,"resource edit did not dirty exactly one tile");
-  life::NativeSimulation prunedLineage(96,60,.2,500,524114809,334462,5);prunedLineage.select(1);prunedLineage.step(2'000);check(prunedLineage.metrics().organisms==simulation.metrics().organisms,"lineage pruning changed living population");near(prunedLineage.metrics().averageEnergy,simulation.metrics().averageEnergy,1e-12,"lineage pruning changed simulation energy");check(prunedLineage.lineageRecordCount()<simulation.lineageRecordCount(),"lineage pruning did not remove dead leaves");check(prunedLineage.inspect(1).has_value(),"selected lineage record was pruned");
+  life::NativeSimulation prunedLineage(96,60,.2,500,524114809,334462,5);life::NativeSimulationTestAccess::legacy(prunedLineage);prunedLineage.select(1);prunedLineage.step(2'000);check(prunedLineage.metrics().organisms==simulation.metrics().organisms,"lineage pruning changed living population");near(prunedLineage.metrics().averageEnergy,simulation.metrics().averageEnergy,1e-12,"lineage pruning changed simulation energy");check(prunedLineage.lineageRecordCount()<simulation.lineageRecordCount(),"lineage pruning did not remove dead leaves");check(prunedLineage.inspect(1).has_value(),"selected lineage record was pruned");
   if (!failures) std::cout << "Native deterministic ecology and spatial contract passed.\n";
   return failures ? 1 : 0;
 }
+
+

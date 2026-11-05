@@ -19,7 +19,7 @@ private:
  std::vector<Stored> stored_;std::vector<BranchSummary> branches_;std::vector<SimulationCommand> commands_;std::vector<JournalEntry> journal_;std::vector<LibraryItem> items_;
  std::shared_ptr<const GenomeRecord> left_,right_;GenomeComparison comparison_;std::shared_ptr<NativeSimulation> replacement_;
  uint64_t lastCommand_{},memoryBytes_{},diskBytes_{};
- uint64_t run_{},active_{1},nextBranch_{2},nextCheckpoint_{1},revision_{},epoch_{};int width_{},height_{},tick_{},presentTick_{};bool preview_{};double captureMs_{};ResearchEcology ecology_;std::string status_="Research ready";
+ uint64_t run_{},active_{1},nextBranch_{2},nextCheckpoint_{1},revision_{},epoch_{};int lastObservedTick_{-1};int width_{},height_{},tick_{},presentTick_{};bool preview_{};double captureMs_{};ResearchEcology ecology_;std::string status_="Research ready";
  std::filesystem::path present_;std::vector<uint64_t> presentGenomes_;
  void publish();void status(std::string);void scanLibrary();
  Stored persist(const std::shared_ptr<NativeSimulation>&,uint64_t branch,bool pinned);

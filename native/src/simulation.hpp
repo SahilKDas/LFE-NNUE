@@ -15,7 +15,7 @@
 #include <filesystem>
 
 namespace life {
-enum class DeathCause : uint8_t { None, Starvation, Combat, OldAge, ThermalStress, Terrain, RespiratoryFailure };
+enum class DeathCause : uint8_t { None, Starvation, Combat, OldAge, ThermalStress, Terrain, RespiratoryFailure, Disease };
 const char* deathCauseName(DeathCause cause);
 struct OrganismLineage {
   int generation{},birthTick{},deathTick{-1},totalDescendants{},directOffspring{};
@@ -64,6 +64,7 @@ struct OrganismInspection {
   int id{},parentId{-1},generation{},birthTick{},deathTick{-1},age{},cellCount{},energy{},minerals{},damage{};
   double mutability{},neuralMutability{},thermalStress{},respiratoryStress{},oxygenTolerance{},stressRecovery{},frailty{},respiratoryRisk{},temperature{},fertility{},metabolicCost{};
   bool alive{},isMover{};int perceptionRadius{},senseChannels{},neuralCost{},totalDescendants{},attackDurability{},armorDurability{};uint64_t carrionConsumed{},nutrientsReleased{},decompositionEnergy{};int localNutrients{};
+  ResearchGenes genes;LifeStage stage{LifeStage::Adult};double infection{},immunity{};int incubationProgress{};
   std::string action,diet,terrain,resource,deathCause;
   std::vector<std::string> mutations;
   std::vector<LineageSummary> ancestors,descendants;
@@ -93,6 +94,7 @@ class NativeSimulation {
   int width_, height_; uint32_t worldSeed_; Mulberry32 random_; int nextId_{1}, ticks_{}, resets_{}, record_{}, largest_{}, selectedId_{-1}, deadCount_{};uint64_t nextBrainGenomeId_{1};
   double foodChance_; int lifespan_, lineageLimit_, nnueEvaluations_{}; std::vector<Organism> organisms_;
   double atmosphericOxygen_{.21},carbonDioxide_{.0004};
+  bool researchRules_{true}; // Friend-only legacy regression control; normal worlds always enable research biology.
   bool reproductionEnabled_{true}, mortalityEnabled_{true}; int populationTarget_{};
   int births_{};
   bool profileTicks_{};
@@ -169,6 +171,9 @@ class NativeSimulation {
   void placeBody(const Organism& organism);
   void refreshCapabilities(Organism& organism);
   PreparedPhysiology preparePhysiology(const Organism& organism) const;
+  void updateSignals();
+  void updateDisease();
+  void processDiseaseMortality();
   void updateOrganism(Organism& organism,size_t slot=SIZE_MAX);
   void eat(Organism& organism, CellType mouth, int x, int y);
   void produce(Organism& organism, int x, int y);
@@ -198,6 +203,9 @@ class NativeSimulation {
   void registerAtmosphere(const Organism& organism,int sign);
   void rebuildAtmosphereCounts();
   void updateNutrients();
+  ResearchGenes mutateResearchGenes(ResearchGenes);
+  bool updateDevelopment(Organism&);
+
   void archiveState(struct StateArchive& archive);
   void archiveResearch(struct StateArchive& archive);
   void saveArchive(const std::filesystem::path&,uint32_t,const std::filesystem::path&);
@@ -208,7 +216,7 @@ class NativeSimulation {
   std::vector<SimulationCommand> commands_;std::vector<JournalEntry> journal_;std::vector<ResearchEcology> researchTimeline_;
   uint64_t journalSequence_{};int diseaseDeaths_{},lastDiseaseDeath_{-10},hatches_{},maturations_{};
   std::array<std::vector<uint16_t>,2> signals_;std::array<std::vector<uint16_t>,2> signalScratch_;
-  std::vector<double> infectionPrepared_;
+  std::vector<double> infectionPrepared_;std::vector<int> diseaseOrder_;
 
   void pruneLineage();
 public:
@@ -230,6 +238,8 @@ public:
   const std::vector<JournalEntry>& journal()const{return journal_;}
   const std::vector<ResearchEcology>& researchTimeline()const{return researchTimeline_;}
   ResearchEcology researchEcology()const;
+  uint16_t signalAt(int channel,int x,int y)const {const auto& layer=signals_[channel&1];return layer.empty()?0:layer[size_t(wrapY(y)/8)*((width_+7)/8)+wrapX(x)/8];}
+  const std::array<std::vector<uint16_t>,2>& signalLayers()const{return signals_;}
   void researchIdentity(uint64_t run,uint64_t branch){runId_=run;branchId_=branch;}
   void profileTicks(bool enabled){profileTicks_=enabled;}
   void setParallelAnalysis(bool enabled){parallelAnalysis_=enabled;}
@@ -278,3 +288,4 @@ public:
   const std::vector<Organism>& organisms() const { return organisms_; }
 };
 }
+

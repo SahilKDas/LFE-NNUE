@@ -1,0 +1,52 @@
+# Real native Research UI/controller; no desktop input or window.
+resize 1920 1080
+seed 100
+select family
+research headless/research-ui
+research-wait
+research-page genomes
+research-action 0
+research-action 1
+research-action 2
+research-wait
+assert research-genomes
+export headless/research-genomes.png
+research-action 3
+research-wait
+research-page library
+assert research-library-min 1
+research-action 1
+research-wait
+assert research-library-min 2
+export headless/research-library.png
+research-page history
+research-action 0
+research-wait
+step 60
+research-mark
+research-field 0 "20"
+research-action 1
+research-wait
+assert research-preview on
+export headless/research-history.png
+research-action 2
+research-wait
+assert research-preview off
+assert research-digest
+research-field 1 "Alternative"
+research-action 3
+research-wait
+assert research-branches-min 2
+research-page experiments
+research-field 0 "12"
+research-action 0
+research-wait
+assert research-branches-min 4
+assert research-preview off
+assert research-budget
+export headless/research-experiments.png
+research-page journal
+research-action 0
+research-wait
+frame
+export headless/research-journal.png
