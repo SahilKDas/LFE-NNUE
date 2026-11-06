@@ -6,6 +6,7 @@
 namespace life {
 struct FrameDiagnostics {
   std::shared_ptr<const AtlasSnapshot> atlas;std::shared_ptr<const std::unordered_map<int,int>> speciesByOwner;
+  std::shared_ptr<const std::array<std::vector<uint16_t>,2>> signals;std::shared_ptr<const std::unordered_map<int,uint8_t>> biology;int biologyMode{};
   NativeMetrics metrics;std::optional<OrganismInspection> inspection;WatchedSnapshot watched;
   std::unordered_map<int,FamilyRole> family;
   std::vector<std::pair<int,uint16_t>> familyTiles;

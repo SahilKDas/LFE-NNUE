@@ -7,15 +7,19 @@
 namespace life {
 enum class EvolutionEventType : uint8_t { Season, PopulationPeak, Crash, Recovery, ResourceShortage, AtmosphericStress, Speciation, Extinction, Regeneration, CarrionAccumulation, NutrientCollapse, NutrientRecovery, DecomposerEmergence, DecomposerExtinction, HabitatShift };
 
-struct GenomeDescriptor {
+struct LegacyGenomeDescriptor {
   uint64_t bodyHash{},neuralSignature{},brainGenomeId{};
   std::array<uint8_t,13> cellCounts{};
   uint8_t dietMask{},perceptionRadius{};
   uint16_t senseChannels{};
   uint16_t moveRange{},birthDistance{},oxygenTolerance{},stressRecovery{},frailty{},mutability{},neuralMutability{};
-  bool operator==(const GenomeDescriptor&) const=default;
+  bool operator==(const LegacyGenomeDescriptor&) const=default;
 };
 
+struct GenomeDescriptor : LegacyGenomeDescriptor {
+  std::array<uint16_t,8> researchTraits{0,350,4,30,0,0,3500,100};
+  bool operator==(const GenomeDescriptor&) const=default;
+};
 // Reusable open-addressed query cache. Representatives are immutable during a
 // scan; newly created species extend the search instead of invalidating results.
 class SpeciesDistanceCache {
@@ -30,7 +34,7 @@ public:
   Entry& query(GenomeDescriptor key){
     key.brainGenomeId=key.mutability=key.neuralMutability=0;uint64_t hash=key.bodyHash^key.neuralSignature;
     const auto mix=[&](uint64_t value){hash^=value+0x9e3779b97f4a7c15ULL+(hash<<6)+(hash>>2);};
-    for(auto count:key.cellCounts)mix(count);mix(key.dietMask);mix(key.perceptionRadius);mix(key.senseChannels);mix(key.moveRange);mix(key.birthDistance);mix(key.oxygenTolerance);mix(key.stressRecovery);mix(key.frailty);
+    for(auto count:key.cellCounts)mix(count);mix(key.dietMask);mix(key.perceptionRadius);mix(key.senseChannels);mix(key.moveRange);mix(key.birthDistance);mix(key.oxygenTolerance);mix(key.stressRecovery);mix(key.frailty);for(auto value:key.researchTraits)mix(value);
     const size_t start=size_t(hash)&(entries_.size()-1);for(size_t index=start;;index=(index+1)&(entries_.size()-1)){auto& entry=entries_[index];if(entry.epoch!=epoch_){++used_;entry={key,hash,epoch_,0,SIZE_MAX,2};return entry;}if(entry.hash==hash&&entry.key==key)return entry;}
   }
 };

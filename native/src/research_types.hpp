@@ -41,12 +41,12 @@ struct WeightDifference {uint32_t row{};uint32_t changed{};double magnitude{};};
 struct GenomeComparison {std::vector<std::string> traits;std::vector<WeightDifference> rows;uint64_t changedWeights{};double magnitude{};};
 enum class JournalKind:uint8_t {Ecology,Development,Infection,Recovery,DiseaseDeath,Experiment,Introduction,HistoryGap};
 struct JournalEntry {uint64_t sequence{},run{},branch{1};int firstTick{},lastTick{},organism{-1},species{-1},count{1};JournalKind kind{};std::string label,evidence;};
-struct ResearchEcology {int tick{},eggs{},juveniles{},infected{},immune{},diseaseDeaths{},hatched{},matured{};uint64_t signalA{},signalB{};};
+struct ResearchEcology {int tick{},population{},births{},deaths{},eggs{},juveniles{},infected{},immune{},diseaseDeaths{},hatched{},matured{};uint64_t signalA{},signalB{};};
 struct BranchSummary {uint64_t id{},parent{};std::string name;int forkTick{},tick{},population{},births{},deaths{};bool active{};std::vector<ResearchEcology> ecology;};
 struct CheckpointInfo {uint64_t id{},branch{1},command{};int tick{};uint64_t bytes{};std::filesystem::path path;};
-struct LibraryItem {std::string name,notes;std::filesystem::path path;bool world{};int population{},tick{},cells{};uint64_t genome{};};
+struct LibraryItem {std::string name,notes;std::filesystem::path path;bool world{};int population{},tick{},cells{};uint64_t genome{};std::vector<BodyCell> preview;std::vector<uint32_t> worldPreview;std::string season;};
 struct ResearchSnapshot {
-  uint64_t revision{};uint64_t branch{1};int tick{},presentTick{},seekTick{};bool preview{},busy{};double progress{},captureMs{};std::string status;
+  uint64_t revision{},run{};uint64_t branch{1};int tick{},presentTick{},seekTick{};bool preview{},busy{};double progress{},captureMs{};std::string status;
   uint64_t memoryBytes{},diskBytes{};std::vector<CheckpointInfo> checkpoints;std::vector<BranchSummary> branches;std::vector<JournalEntry> journal;std::vector<LibraryItem> library;
   std::shared_ptr<const GenomeRecord> left,right;GenomeComparison comparison;ResearchEcology ecology;
 };

@@ -18,8 +18,11 @@ private:
  std::atomic<std::shared_ptr<const ResearchSnapshot>> published_;
  std::vector<Stored> stored_;std::vector<BranchSummary> branches_;std::vector<SimulationCommand> commands_;std::vector<JournalEntry> journal_;std::vector<LibraryItem> items_;
  std::shared_ptr<const GenomeRecord> left_,right_;GenomeComparison comparison_;std::shared_ptr<NativeSimulation> replacement_;
- uint64_t lastCommand_{},memoryBytes_{},diskBytes_{};
- uint64_t run_{},active_{1},nextBranch_{2},nextCheckpoint_{1},revision_{},epoch_{};int lastObservedTick_{-1};int width_{},height_{},tick_{},presentTick_{};bool preview_{};double captureMs_{};ResearchEcology ecology_;std::string status_="Research ready";
+ uint64_t lastCommand_{},protectedCheckpoint_{};std::atomic_uint64_t memoryBytes_{0},diskBytes_{0};
+ uint64_t run_{},active_{1},nextBranch_{2},nextCheckpoint_{1},revision_{},epoch_{};int lastObservedTick_{-1};int width_{},height_{},tick_{},presentTick_{};bool preview_{};std::atomic<double> captureMs_{0};ResearchEcology ecology_;std::string status_="Research ready";
+ struct Introduction {GenomeRecord genome;std::filesystem::path artifact;int x{},y{};};std::vector<Introduction> introductions_;
+ void worldMetadata(const NativeSimulation&,const std::filesystem::path&,const std::string&);
+ std::string journalQuery_;int journalFilter_{-1};
  std::filesystem::path present_;std::vector<uint64_t> presentGenomes_;
  void publish();void status(std::string);void scanLibrary();
  Stored persist(const std::shared_ptr<NativeSimulation>&,uint64_t branch,bool pinned);

@@ -12,20 +12,20 @@ struct DecisionRecord {
   std::array<float,OutputSize> outputs{};
 };
 struct DecodedSense {
-  int dx{},dy{};uint32_t categories{};bool nutrients{},carrionDensity{};
+  int dx{},dy{};uint32_t categories{};bool nutrients{},carrionDensity{};int signalA{-1},signalB{-1};
 };
 inline std::vector<DecodedSense> decodeSenses(const DecisionRecord& decision){
   std::vector<DecodedSense> result;result.reserve(PositionCount);int position=0;
   for(int ring=1;ring<=MaximumSensorRadius;++ring)for(int dy=-ring;dy<=ring;++dy)for(int dx=-ring;dx<=ring;++dx){
     if((!dx&&!dy)||std::max(std::abs(dx),std::abs(dy))!=ring)continue;
     const int index=position++;if(ring>decision.radius)continue;DecodedSense cell{dx,dy};
-    for(size_t feature=0;feature<decision.featureCount;++feature){const int value=decision.features[feature];if(value<PositionCount*FeatureCategories&&value/FeatureCategories==index)cell.categories|=1u<<(value%FeatureCategories);else if(value==NutrientFeatureOffset+index)cell.nutrients=true;else if(value==CarrionDensityFeatureOffset+index)cell.carrionDensity=true;}
+    for(size_t feature=0;feature<decision.featureCount;++feature){const int value=decision.features[feature];if(value<PositionCount*FeatureCategories&&value/FeatureCategories==index)cell.categories|=1u<<(value%FeatureCategories);else if(value==NutrientFeatureOffset+index)cell.nutrients=true;else if(value==CarrionDensityFeatureOffset+index)cell.carrionDensity=true;else if(value>=SignalAFeatureOffset+index*4&&value<SignalAFeatureOffset+(index+1)*4)cell.signalA=value-(SignalAFeatureOffset+index*4);else if(value>=SignalBFeatureOffset+index*4&&value<SignalBFeatureOffset+(index+1)*4)cell.signalB=value-(SignalBFeatureOffset+index*4);}
     result.push_back(cell);
   }return result;
 }
 inline std::string senseLabel(const DecodedSense& cell){
   constexpr const char* labels[]={"Empty","Plant","Wall","Self","Organism","Killer","Danger","Heading up","Heading down","Heading left","Heading right","Unused","Carrion","Mineral","Unused","Plains","Fertile","Desert","Water","Mountain"};
-  std::string result;for(int bit=0;bit<FeatureCategories;++bit)if(cell.categories&(1u<<bit)){if(!result.empty())result+=" / ";result+=labels[bit];}if(cell.nutrients)result+=(result.empty()?"":" / ")+std::string("Nutrients");if(cell.carrionDensity)result+=(result.empty()?"":" / ")+std::string("Dense carrion");return result.empty()?"No enabled signal":result;
+  std::string result;for(int bit=0;bit<FeatureCategories;++bit)if(cell.categories&(1u<<bit)){if(!result.empty())result+=" / ";result+=labels[bit];}if(cell.nutrients)result+=(result.empty()?"":" / ")+std::string("Nutrients");if(cell.carrionDensity)result+=(result.empty()?"":" / ")+std::string("Dense carrion");if(cell.signalA>=0)result+=" / Signal A band "+std::to_string(cell.signalA);if(cell.signalB>=0)result+=" / Signal B band "+std::to_string(cell.signalB);return result.empty()?"No enabled signal":result;
 }
 inline int wrapCoordinate(int value,int size){return (value%size+size)%size;}
 inline double nearestWrapped(double value,double reference,double size){return value+std::round((reference-value)/size)*size;}

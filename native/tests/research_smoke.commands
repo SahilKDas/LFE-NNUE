@@ -50,3 +50,19 @@ research-action 0
 research-wait
 frame
 export headless/research-journal.png
+
+research-close
+exchange on
+overlay signal-a
+frame
+assert palette-coherent
+overlay signal-b
+frame
+assert palette-coherent
+overlay disease
+frame
+assert palette-coherent
+overlay development
+frame
+assert palette-coherent
+export headless/research-development.png

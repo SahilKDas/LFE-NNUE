@@ -47,7 +47,7 @@ void NativeSimulation::archiveState(StateArchive& a){
   if(!a.reading){legacyElevation.resize(cells.size());legacyHabitat.resize(cells.size());legacyMoisture.resize(cells.size());}
   a.fields(world.terrain,world.resources,world.resourceAmount,world.nutrients,legacyElevation,legacyHabitat,legacyMoisture,cells,owners,activeSlots_,regionAwake_,regionNutrientTotals_,climateTemperature_,climateFertility_,climateGradient_,climateBand_,timeline_);
   uint64_t count=species_.size();a(count);if(count>100000)throw std::runtime_error("Invalid species count");if(a.reading)species_.resize(count);
-  for(auto& s:species_)a.fields(s.id,s.parentId,s.representativeId,s.population,s.peakPopulation,s.firstTick,s.lastTick,s.missingScans,s.descendantSpecies,s.dominantTerrain,s.dietMask,s.extinct,s.extinctionCause,s.recentDeathCauses,s.recentDeathCount,s.recentDeathCursor,s.representative,s.habitatPopulation,s.averageElevation,s.dominantHabitat);
+  for(auto& s:species_){a.fields(s.id,s.parentId,s.representativeId,s.population,s.peakPopulation,s.firstTick,s.lastTick,s.missingScans,s.descendantSpecies,s.dominantTerrain,s.dietMask,s.extinct,s.extinctionCause,s.recentDeathCauses,s.recentDeathCount,s.recentDeathCursor);a(static_cast<LegacyGenomeDescriptor&>(s.representative));if(a.version>=3)a(s.representative.researchTraits);a.fields(s.habitatPopulation,s.averageElevation,s.dominantHabitat);}
   count=evolutionEvents_.size();a(count);if(count>100000)throw std::runtime_error("Invalid event count");if(a.reading)evolutionEvents_.resize(count);for(auto& e:evolutionEvents_)a.fields(e.type,e.tick,e.speciesId,e.value,e.label);
   std::vector<std::shared_ptr<Nnue>> brains;std::unordered_map<const Nnue*,uint64_t> brainIndices;
   if(!a.reading)for(auto& o:organisms_)if(o.brain&&!brainIndices.contains(o.brain.get())){brainIndices[o.brain.get()]=brains.size();brains.push_back(o.brain);}
@@ -56,7 +56,7 @@ void NativeSimulation::archiveState(StateArchive& a){
   Mulberry32 temporary(0);for(auto& brain:brains){
     if(a.reading){brain=std::make_shared<Nnue>(temporary,Nnue::DeferredInit{});brain->deferredSeed_.reset();}else brain->materialize();
     if(a.version<3){a.fields(brain->weights_->input,brain->weights_->hidden,brain->accumulator,brain->weights_->output,brain->weights_->bias,brain->output,brain->active,brain->signatureCache_);}
-    else {if(a.genomeFolder.empty())brainWeights(a,*brain->weights_);else{uint64_t key=a.reading?0:brain->signature();a(key);if(a.reading){auto [it,created]=loadedWeights.try_emplace(key);if(created)it->second=readBrain(a.genomeFolder,key);brain->weights_=it->second;}else storeBrain(a.genomeFolder,key,brain->weights_);}a.fields(brain->accumulator,brain->output,brain->active,brain->signatureCache_,brain->outputValid_);}
+    else {if(a.genomeFolder.empty()){brainWeights(a,*brain->weights_);if(a.reading)brain->weights_=cacheGenome(brain->signature(),brain->weights_);}else{uint64_t key=a.reading?0:brain->signature();a(key);if(a.reading){auto [it,created]=loadedWeights.try_emplace(key);if(created)it->second=readBrain(a.genomeFolder,key);brain->weights_=it->second;}else storeBrain(a.genomeFolder,key,brain->weights_);}a.fields(brain->accumulator,brain->output,brain->active,brain->signatureCache_,brain->outputValid_);}
     if(a.reading&&brain->weights_->input.size()==ResearchFeatureOffset)brain->weights_->input.resize(InputSize);if(brain->weights_->input.size()!=InputSize)throw std::runtime_error("Incompatible neural topology");for(uint16_t feature:brain->active)if(feature>=InputSize)throw std::runtime_error("Invalid neural runtime feature");
   }
   count=organisms_.size();a(count);if(count>500000)throw std::runtime_error("Invalid organism count");if(a.reading)organisms_.resize(count);
@@ -64,13 +64,13 @@ void NativeSimulation::archiveState(StateArchive& a){
   if(a.reading){const size_t area=size_t(width_)*height_;if(world.terrain.size()!=area||world.resources.size()!=area||world.resourceAmount.size()!=area||world.nutrients.size()!=area||legacyElevation.size()!=area||legacyHabitat.size()!=area||legacyMoisture.size()!=area||cells.size()!=area||owners.size()!=area)throw std::runtime_error("Invalid world layers");
     // Caves and bridges from older archives become ordinary traversable land.
     for(size_t i=0;i<area;++i){if(world.terrain[i]>uint8_t(TerrainType::Mountain)||legacyHabitat[i]>2)throw std::runtime_error("Invalid legacy terrain");if(legacyHabitat[i]&& !passable(world,int(i)))world.terrain[i]=uint8_t(TerrainType::Plains);}
-    savedView.weather=false;savedView.habitatHistory=false;if(savedView.overlay>6)savedView.overlay=0;if(savedView.tool>9)savedView.tool=0;
+    savedView.weather=false;savedView.habitatHistory=false;if(savedView.overlay>(a.version>=3?10:6))savedView.overlay=0;if(savedView.tool>9)savedView.tool=0;
     for(auto& sample:timeline_){sample.cavePopulation=sample.bridgePopulation=sample.rainfall=0;sample.averageElevation=sample.averageMoisture=0;}
     for(auto& species:species_){species.habitatPopulation.fill(0);species.averageElevation=0;species.dominantHabitat=0;}
     std::erase_if(evolutionEvents_,[](const auto& event){return event.type==EvolutionEventType::HabitatShift;});
 slotById_.clear();for(size_t i=0;i<organisms_.size();++i)slotById_[organisms_[i].id]=i;for(auto slot:activeSlots_)if(slot!=SIZE_MAX&&slot>=organisms_.size())throw std::runtime_error("Invalid active slot");classificationBuffer_.clear();speciesSlotById_.clear();for(size_t index=0;index<species_.size();++index)speciesSlotById_[species_[index].id]=index;classificationCache_.invalidate();respiratoryCandidates_.clear();rebuildRegionIndex();rebuildOwnerSlots();rebuildAtmosphereCounts();markAllDirty();}
 }
-void NativeSimulation::save(const std::filesystem::path& path,uint32_t archiveVersion){saveArchive(path,archiveVersion,{});}
+void NativeSimulation::save(const std::filesystem::path& path,uint32_t archiveVersion){if(archiveVersion!=3)throw std::runtime_error("Legacy export would discard research state; save as version 3");saveArchive(path,archiveVersion,{});}
 void NativeSimulation::saveArchive(const std::filesystem::path& path,uint32_t archiveVersion,const std::filesystem::path& genomes){
   if(archiveVersion!=1&&archiveVersion!=2&&archiveVersion!=3)throw std::runtime_error("Unsupported save version");
   static_assert(sizeof(SavedView)==52,"Version 1 camera layout must remain stable");
