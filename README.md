@@ -49,6 +49,14 @@ Rendering defaults to **30 FPS**. Choose **60** for a higher cap. Requested TPS 
 
 World tools paint plant matter, carrion, minerals, nutrients, and terrain. Overlays show resources, productivity, climate, species, soil nutrients, and decomposition.
 
+## Evolution Research
+
+Press **R** or click **Research** to open History, Experiments, Genomes, Journal, and Library. History records a checkpoint every 600 ticks when the capture fits the 128 MiB memory and 2 GiB managed disk budgets. Seek to a retained tick, return to the present, or create a branch. Experiments run two branches sequentially for the same number of ticks, with one intervention in the second branch.
+
+Compare retained creatures or specimens, browse recorded ecological events, and save named worlds and creature genomes. The library stores explicit saves separately from automatic checkpoint eviction. New saves use archive version 3. Existing version 1 and 2 worlds load with neutral research traits and zero weights on the new neural inputs.
+
+Egg-laying, juvenile growth, two anonymous chemical signals, and resistance to locally spreading disease can evolve. Use the Signal A, Signal B, Disease, and Development overlays to inspect these changes.
+
 ## The ecosystem
 
 ### Bodies, brains, and inheritance

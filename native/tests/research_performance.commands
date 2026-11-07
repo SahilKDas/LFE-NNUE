@@ -1,0 +1,14 @@
+# Time both workloads in the native renderer. The headless runner checks power
+# before setup and during measurement. No window or desktop input is used.
+resize 1920 1080
+research headless/research-perf-regular
+research-wait
+research-close
+ui-play 10 headless/research-regular-10s.json
+seed 10000
+research headless/research-perf-diverse
+research-wait
+research-close
+select family
+follow
+benchmark 12 headless/research-diverse-12s.json

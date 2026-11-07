@@ -77,3 +77,5 @@ reports use `validation: "deferred"` and `performance_passed: null`; process exi
 code 3 means deferred. Functional command scripts and fixed-tick replay tests
 remain available. The native CLI and optional UI performance runners apply the
 same power conditions. Ordinary gameplay is unaffected.
+
+For the research workloads, run `life_engine.exe --headless-script=<absolute path to native/tests/research_performance.commands>` from an isolated build directory. The script runs the regular game with UI interactions for 10 seconds, then follows a large family in the 10,000-creature diverse world for 12 seconds. The diverse run extends past the first automatic checkpoint at tick 600. Reports appear in the build directory's `headless` folder.

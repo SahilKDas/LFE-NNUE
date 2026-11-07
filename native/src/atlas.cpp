@@ -12,7 +12,7 @@ double genomeDistanceScalar(const GenomeDescriptor& left,const GenomeDescriptor&
   const double neural=double(std::popcount(left.neuralSignature^right.neuralSignature))/64.0;
   const double behavior=(std::abs(int(left.perceptionRadius)-int(right.perceptionRadius))/3.0+double(std::popcount(uint16_t(left.senseChannels^right.senseChannels)))/8.0+std::min(1.0,std::abs(int(left.moveRange)-int(right.moveRange))/8.0)+std::min(1.0,std::abs(int(left.birthDistance)-int(right.birthDistance))/8.0))/4.0;
   const double physiology=((left.dietMask==right.dietMask?0.0:1.0)+std::abs(int(left.oxygenTolerance)-int(right.oxygenTolerance))/800.0+std::abs(int(left.stressRecovery)-int(right.stressRecovery))/230.0+std::abs(int(left.frailty)-int(right.frailty))/1650.0)/4.0;
-  return topology*.40+neural*.30+behavior*.15+physiology*.15+researchDistance(left,right)*.15;
+  return topology*.40+neural*.30+behavior*.15+(physiology+(1-std::min(1.,physiology))*researchDistance(left,right))*.15;
 }
 __attribute__((target("popcnt")))
 double genomeDistancePopcnt(const GenomeDescriptor& left,const GenomeDescriptor& right){
@@ -21,7 +21,7 @@ double genomeDistancePopcnt(const GenomeDescriptor& left,const GenomeDescriptor&
   const double neural=double(std::popcount(left.neuralSignature^right.neuralSignature))/64.0;
   const double behavior=(std::abs(int(left.perceptionRadius)-int(right.perceptionRadius))/3.0+double(std::popcount(uint16_t(left.senseChannels^right.senseChannels)))/8.0+std::min(1.0,std::abs(int(left.moveRange)-int(right.moveRange))/8.0)+std::min(1.0,std::abs(int(left.birthDistance)-int(right.birthDistance))/8.0))/4.0;
   const double physiology=((left.dietMask==right.dietMask?0.0:1.0)+std::abs(int(left.oxygenTolerance)-int(right.oxygenTolerance))/800.0+std::abs(int(left.stressRecovery)-int(right.stressRecovery))/230.0+std::abs(int(left.frailty)-int(right.frailty))/1650.0)/4.0;
-  return topology*.40+neural*.30+behavior*.15+physiology*.15+researchDistance(left,right)*.15;
+  return topology*.40+neural*.30+behavior*.15+(physiology+(1-std::min(1.,physiology))*researchDistance(left,right))*.15;
 }
 double genomeDistance(const GenomeDescriptor& left,const GenomeDescriptor& right){
   static const auto kernel=[] {__builtin_cpu_init();return __builtin_cpu_supports("popcnt")?genomeDistancePopcnt:genomeDistanceScalar;}();return kernel(left,right);
@@ -39,7 +39,7 @@ double genomeDistanceBoundedScalar(const GenomeDescriptor& left,const GenomeDesc
   if(partial+approximateBehavior*.15+approximatePhysiology*.15>bound+1e-9)return 2;
   const double behavior=(std::abs(int(left.perceptionRadius)-int(right.perceptionRadius))/3.0+double(std::popcount(uint16_t(left.senseChannels^right.senseChannels)))/8.0+std::min(1.0,std::abs(int(left.moveRange)-int(right.moveRange))/8.0)+std::min(1.0,std::abs(int(left.birthDistance)-int(right.birthDistance))/8.0))/4.0;
   const double physiology=((left.dietMask==right.dietMask?0.0:1.0)+std::abs(int(left.oxygenTolerance)-int(right.oxygenTolerance))/800.0+std::abs(int(left.stressRecovery)-int(right.stressRecovery))/230.0+std::abs(int(left.frailty)-int(right.frailty))/1650.0)/4.0;
-  return partial+behavior*.15+physiology*.15+researchDistance(left,right)*.15;
+  return partial+behavior*.15+(physiology+(1-std::min(1.,physiology))*researchDistance(left,right))*.15;
 }
 __attribute__((target("popcnt")))
 double genomeDistanceBoundedPopcnt(const GenomeDescriptor& left,const GenomeDescriptor& right,double bound){
@@ -55,7 +55,7 @@ double genomeDistanceBoundedPopcnt(const GenomeDescriptor& left,const GenomeDesc
   if(partial+approximateBehavior*.15+approximatePhysiology*.15>bound+1e-9)return 2;
   const double behavior=(std::abs(int(left.perceptionRadius)-int(right.perceptionRadius))/3.0+double(std::popcount(uint16_t(left.senseChannels^right.senseChannels)))/8.0+std::min(1.0,std::abs(int(left.moveRange)-int(right.moveRange))/8.0)+std::min(1.0,std::abs(int(left.birthDistance)-int(right.birthDistance))/8.0))/4.0;
   const double physiology=((left.dietMask==right.dietMask?0.0:1.0)+std::abs(int(left.oxygenTolerance)-int(right.oxygenTolerance))/800.0+std::abs(int(left.stressRecovery)-int(right.stressRecovery))/230.0+std::abs(int(left.frailty)-int(right.frailty))/1650.0)/4.0;
-  return partial+behavior*.15+physiology*.15+researchDistance(left,right)*.15;
+  return partial+behavior*.15+(physiology+(1-std::min(1.,physiology))*researchDistance(left,right))*.15;
 }
 double genomeDistanceBounded(const GenomeDescriptor& left,const GenomeDescriptor& right,double bound){
   static const auto kernel=[] {__builtin_cpu_init();return __builtin_cpu_supports("popcnt")?genomeDistanceBoundedPopcnt:genomeDistanceBoundedScalar;}();return kernel(left,right,bound);
