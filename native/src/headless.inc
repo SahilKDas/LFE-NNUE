@@ -59,7 +59,7 @@ bool headlessUiBenchmark(int seconds,const std::filesystem::path& path){
   while(Clock::now()<end){pacer.until(next);auto now=Clock::now();if(now>=nextPower){power=life::performancePowerState();if(!power.eligible()){deferred=true;break;}nextPower=now+std::chrono::seconds(1);}
     std::optional<Clock::time_point> input;
     if(now>=nextInput){input=Clock::now();const auto revision=nextUiCommand;
-      switch(inputs%8){
+      switch(inputs%12){
         case 0:activeOverlay=Overlay((int(activeOverlay)+1)%11);break;
         case 1:activeTool=Tool::Plant;applyTool(100+(inputs*17)%800,180+(inputs*11)%400);break;
         case 2:activeTool=Tool::Inspect;applyTool(512,402);break;
@@ -68,6 +68,10 @@ bool headlessUiBenchmark(int seconds,const std::filesystem::path& path){
         case 5:atlasOpen=false;cameraX+=3;zoom=zoom==1?1.2f:1.f;break;
         case 6:if(selectedId>=0)toggleFollowing(nullptr);break;
         case 7:activeTool=Tool::Nutrients;applyTool(180+(inputs*13)%1100,240);break;
+        case 8:helpTab=int(helpTabs.size())-1;toggleHelp();break;
+        case 9:helpTab=0;break;
+        case 10:helpOpen=false;researchOpen=bool(researchSuite);researchPage=3;break;
+        case 11:researchOpen=false;break;
       }
       if(nextUiCommand!=revision)pending.emplace_back(nextUiCommand,*input);++inputs;nextInput=now+std::chrono::milliseconds(250);
     }
@@ -89,6 +93,12 @@ int runHeadlessScript(const std::filesystem::path& script){
     while(std::getline(input,line)){++lineNumber;std::istringstream command(line);std::string action;command>>action;if(action.empty()||action.front()=='#')continue;if(++commands>10000)throw std::runtime_error("Headless script exceeds 10,000 commands");
       const auto pathArgument=[&](){std::string value;command>>std::quoted(value);if(value.empty())throw std::runtime_error("Command requires a path");std::filesystem::path result(value);if(!result.parent_path().empty())std::filesystem::create_directories(result.parent_path());return result;};
       if(action=="research"){const auto path=pathArgument();researchSuite=std::make_unique<life::ResearchSuite>(path);researchSuite->attach(simulation);researchOpen=true;}
+      else if(action=="help"){
+        int page=0;command>>page;
+        require(page>=0&&page<int(helpTabs.size()),"Invalid Help tab");
+        helpTab=page;if(!helpOpen)toggleHelp();
+      }
+      else if(action=="help-close"){if(helpOpen)toggleHelp();}
       else if(action=="research-close")researchOpen=false;
       else if(action=="research-page"){std::string name;command>>name;const std::array<std::string,5> names{"history","experiments","genomes","journal","library"};const auto it=std::find(names.begin(),names.end(),name);require(it!=names.end(),"Unknown research page");researchPage=int(it-names.begin());researchOpen=true;researchFocus=-1;researchScroll=0;researchSelected=-1;}
       else if(action=="research-field"){int field;std::string value;command>>field>>std::quoted(value);require(field>=0&&field<int(researchFields[researchPage].size()),"Invalid research field");researchFields[researchPage][size_t(field)].value=value;}

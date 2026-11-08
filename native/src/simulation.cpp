@@ -177,7 +177,7 @@ void NativeSimulation::eat(Organism& organism, CellType mouth, int x, int y) {
   }
 }
 void NativeSimulation::produce(Organism& organism, int x, int y) {
-  if(organism.isMover||organism.energy<ProduceCost)return;
+  if((organism.isMover&&!moverProducersEnabled_)||organism.energy<ProduceCost)return;
   const int origin=wrappedIndex(x,y);const auto terrain=TerrainType(world.terrain[origin]);const int row=wrapY(y);
   const double productivity=terrain==TerrainType::Fertile?1.35:terrain==TerrainType::Desert?.3:terrain==TerrainType::Plains?1.0:0.0,nutrientFactor=.2+.8*std::min(1.0,world.nutrients[origin]/800.0);
   if(random_()>=foodChance_*climateFertility_[row]*productivity*nutrientFactor)return;
@@ -386,7 +386,7 @@ NativeMetrics NativeSimulation::metrics() const {
   double energy=0,mutation=0,stress=0,oxygenTolerance=0,respiratoryStress=0;int living=0,plantEaters=0,scavengers=0,mineralEaters=0,decomposers=0,predators=0,criticalRespiratory=0;
   size_t memory=cells.capacity()*sizeof(uint8_t)+owners.capacity()*sizeof(int32_t)+(world.terrain.capacity()+world.resources.capacity())*sizeof(uint8_t)+(world.resourceAmount.capacity()+world.nutrients.capacity())*sizeof(uint16_t)+organisms_.capacity()*sizeof(Organism)+organisms_.size()*sizeof(OrganismLineage);
   for(size_t region=0;region<regionBatches_.size();++region){if(!regionAwake_[region])continue;for(const size_t slot:regionBatches_[region]){const auto& organism=organisms_[slot];energy+=organism.energy;mutation+=organism.mutability;stress+=organism.thermalStress;oxygenTolerance+=organism.oxygenTolerance;respiratoryStress+=organism.hypoxiaStress;criticalRespiratory+=organism.respiratoryRisk>=.05;++living;memory+=organism.cells.capacity()*sizeof(BodyCell)+organism.lineage->mutations.capacity()*sizeof(std::string)+organism.lastFeatures.capacity()*sizeof(uint16_t);for(const auto& cell:organism.cells){if(cell.type==CellType::Mouth||cell.type==CellType::PlantMouth)++plantEaters;else if(cell.type==CellType::ScavengerMouth)++scavengers;else if(cell.type==CellType::MineralMouth)++mineralEaters;else if(cell.type==CellType::DecomposerMouth)++decomposers;else if(cell.type==CellType::Killer)++predators;}}}
-  const auto climate=climateAt(height_/2,height_,ticks_);const int awake=int(std::count(regionAwake_.begin(),regionAwake_.end(),uint8_t(1))),dirty=int(std::count(dirtyTiles_.begin(),dirtyTiles_.end(),uint8_t(1)));return{living,record_,resets_,ticks_,largest_,living?energy/living/EnergyScale:0,living?mutation/living:0,living?stress/living:0,climate.temperature,climate.fertility,atmosphericOxygen_,carbonDioxide_,living?oxygenTolerance/living:0,living?respiratoryStress/living:0,plantEaters,scavengers,mineralEaters,decomposers,predators,nnueEvaluations_,respiratoryDeaths_,criticalRespiratory,memory,awake,int(regionAwake_.size())-awake,dirty};
+  const auto climate=climateAt(height_/2,height_,ticks_);const int awake=int(std::count(regionAwake_.begin(),regionAwake_.end(),uint8_t(1))),dirty=int(std::count(dirtyTiles_.begin(),dirtyTiles_.end(),uint8_t(1)));return{living,record_,resets_,ticks_,largest_,living?energy/living/EnergyScale:0,living?mutation/living:0,living?stress/living:0,climate.temperature,climate.fertility,atmosphericOxygen_,carbonDioxide_,living?oxygenTolerance/living:0,living?respiratoryStress/living:0,plantEaters,scavengers,mineralEaters,decomposers,predators,nnueEvaluations_,respiratoryDeaths_,criticalRespiratory,memory,awake,int(regionAwake_.size())-awake,dirty,moverProducersEnabled_};
 }
 }
 

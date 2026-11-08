@@ -229,11 +229,59 @@ std::unique_ptr<life::skia::Api> loadSkia() {
   catch (...) { return std::make_unique<life::skia::Api>(embeddedLibraryPath().c_str()); }
 }
 
+life::skia::Api::Surface frameSurface{};
+life::skia::Api::Paint framePaint{};
+
+void releaseFrameCanvas(){
+  if(frameSurface){api->surfaceUnref(frameSurface);frameSurface=nullptr;}
+  if(framePaint){api->paintDelete(framePaint);framePaint=nullptr;}
+}
+
 void rectangle(life::skia::Api::Canvas canvas, life::skia::Api::Paint paint,
   float left, float top, float right, float bottom, uint32_t color) {
   api->paintSetColor(paint, color);
   const life::skia::Rect rect{left, top, right, bottom};
   api->canvasDrawRect(canvas, &rect, paint);
+}
+
+// UI transitions use elapsed time so their speed is independent of the FPS cap.
+bool uiPointerDown=false;
+float uiBlendStep=1,uiPageProgress=1,uiTimelineWindow=120;
+uint64_t uiAnimationFrame=0;
+struct ButtonMotion {float highlight{};uint64_t seen{};};
+std::unordered_map<uint64_t,ButtonMotion> buttonMotion;
+
+uint32_t blendButtonColor(uint32_t from,uint32_t to,float amount){
+  uint32_t result=0xff000000;
+  for(int shift:{0,8,16}){
+    const float a=float((from>>shift)&255),b=float((to>>shift)&255);
+    result|=uint32_t(std::lround(a+(b-a)*amount))<<shift;
+  }
+  return result;
+}
+
+void uiButton(life::skia::Api::Canvas canvas,life::skia::Api::Paint paint,
+              float left,float top,float right,float bottom,uint32_t color){
+  const uint64_t key=(uint64_t(uint32_t(left))<<32)|uint32_t(top);
+  auto& state=buttonMotion[key];
+  const bool hovered=senseHover.x>=left&&senseHover.x<right&&senseHover.y>=top&&senseHover.y<bottom;
+  const float target=hovered?(uiPointerDown?-1.f:1.f):0.f;
+  state.highlight+=(target-state.highlight)*uiBlendStep;
+  state.seen=uiAnimationFrame;
+  const float intensity=state.highlight>=0?.16f:.24f;
+  const uint32_t fill=blendButtonColor(color,state.highlight>=0?0xffffffff:0xff121d29,
+                                       std::abs(state.highlight)*intensity);
+  rectangle(canvas,paint,left,top,right,bottom,fill);
+}
+
+void beginUiMotion(int page,double dt){
+  static int previousPage=0;
+  if(page!=previousPage){uiPageProgress=0;uiTimelineWindow=float(atlasTimelineWindow);previousPage=page;}
+  uiPageProgress=std::min(1.f,uiPageProgress+float(dt/.18));
+  uiBlendStep=1.f-std::exp(-float(dt)/.055f);
+  uiTimelineWindow+=(float(atlasTimelineWindow)-uiTimelineWindow)*(1.f-std::exp(-float(dt)/.08f));
+  if((++uiAnimationFrame%120)==0)
+    std::erase_if(buttonMotion,[](const auto& entry){return uiAnimationFrame-entry.second.seen>120;});
 }
 
 #include "text_cache.inc"
@@ -281,16 +329,40 @@ void applyTool(int screenX,int screenY){
 
 void renderAtlasView(life::skia::Api::Canvas canvas,life::skia::Api::Paint paint,float left,float top,float right,float bottom){
   rectangle(canvas,paint,left,top,right,bottom,0xff121d29);text(canvas,paint,"EVOLUTION ATLAS",left+24,top+34,20,0xffffffff,true);text(canvas,paint,std::to_string(renderAtlas->timeline.size())+" samples · "+std::to_string(renderAtlas->species.size())+" species · "+std::to_string(renderAtlas->events.size())+" events",left+24,top+55,10,0xff81d2c7);
-  constexpr const char* tabs[]={"Timeline","Species","Tree","Ecology"};const float tabTop=top+68,tabWidth=(right-left-48)/4;for(int index=0;index<4;++index){const float x=left+24+index*tabWidth;rectangle(canvas,paint,x,tabTop,x+tabWidth-6,tabTop+32,index==atlasTab?0xff81d2c7:0xff3a4b68);text(canvas,paint,tabs[index],x+12,tabTop+21,11,index==atlasTab?0xff121d29:0xffffffff,true);}
-  const float bodyTop=tabTop+48;if(atlasTab==0){rectangle(canvas,paint,left+24,bodyTop,right-24,bottom-30,0xff1b2938);if(renderAtlas->timeline.empty()){text(canvas,paint,"Timeline begins after 60 simulation ticks.",left+42,bodyTop+42,12,0xff9099c2);return;}const size_t end=atlasFocusTick<0?renderAtlas->timeline.size():size_t(std::upper_bound(renderAtlas->timeline.begin(),renderAtlas->timeline.end(),atlasFocusTick,[](int tick,const auto& sample){return tick<sample.tick;})-renderAtlas->timeline.begin());const size_t count=std::min<size_t>(end,std::max(10,atlasTimelineWindow)),begin=end-count;int maximum=1;for(size_t index=begin;index<renderAtlas->timeline.size();++index)maximum=std::max(maximum,renderAtlas->timeline[index].population);const float graphLeft=left+52,graphRight=right-42,graphTop=bodyTop+34,graphBottom=bottom-78;float previousX=graphLeft,previousY=graphBottom;for(size_t offset=0;offset<count;++offset){const auto& sample=renderAtlas->timeline[begin+offset];const float x=graphLeft+(graphRight-graphLeft)*offset/std::max<size_t>(1,count-1),y=graphBottom-(graphBottom-graphTop)*sample.population/maximum;if(offset){const int steps=std::max(1,int(std::abs(x-previousX)));for(int step=0;step<=steps;++step){const float amount=float(step)/steps,px=previousX+(x-previousX)*amount,py=previousY+(y-previousY)*amount;rectangle(canvas,paint,px,py,px+2,py+2,0xff81d2c7);}}previousX=x;previousY=y;}const auto& latest=renderAtlas->timeline[end?end-1:0];text(canvas,paint,std::string("Population ")+std::to_string(latest.population)+"  Peak "+std::to_string(maximum)+"  O2 "+std::to_string(int(latest.oxygen*100))+"%  Species "+std::to_string(latest.species),graphLeft,bodyTop+20,11,0xffffffff);text(canvas,paint,"Wheel zoom · recent "+std::to_string(count)+" samples",graphLeft,bottom-48,10,0xff9099c2);int eventLine=0;for(auto event=renderAtlas->events.rbegin();event!=renderAtlas->events.rend()&&eventLine<3;++event,++eventLine)text(canvas,paint,std::to_string(event->tick)+" · "+event->label,graphLeft,bottom-30-eventLine*16,9,0xffd7bd52);}
+  constexpr const char* tabs[]={"Timeline","Species","Tree","Ecology"};const float tabTop=top+68,tabWidth=(right-left-48)/4;for(int index=0;index<4;++index){const float x=left+24+index*tabWidth;uiButton(canvas,paint,x,tabTop,x+tabWidth-6,tabTop+32,index==atlasTab?0xff81d2c7:0xff3a4b68);text(canvas,paint,tabs[index],x+12,tabTop+21,11,index==atlasTab?0xff121d29:0xffffffff,true);}
+  const float bodyTop=tabTop+48;if(atlasTab==0){rectangle(canvas,paint,left+24,bodyTop,right-24,bottom-30,0xff1b2938);if(renderAtlas->timeline.empty()){text(canvas,paint,"Timeline begins after 60 simulation ticks.",left+42,bodyTop+42,12,0xff9099c2);return;}const size_t end=atlasFocusTick<0?renderAtlas->timeline.size():size_t(std::upper_bound(renderAtlas->timeline.begin(),renderAtlas->timeline.end(),atlasFocusTick,[](int tick,const auto& sample){return tick<sample.tick;})-renderAtlas->timeline.begin());const size_t count=std::min<size_t>(end,std::max(10,int(std::lround(uiTimelineWindow)))),begin=end-count;int maximum=1;for(size_t index=begin;index<end;++index)maximum=std::max(maximum,renderAtlas->timeline[index].population);const float graphLeft=left+52,graphRight=right-42,graphTop=bodyTop+34,graphBottom=bottom-108;const size_t columns=std::min(count,size_t(std::max(1.f,graphRight-graphLeft)));
+    api->paintSetColor(paint,0xff81d2c7);
+    api->paintSetAntialias(paint,false);
+    float previousX=graphLeft,previousY=graphBottom;
+    const auto project=[&](int population){return graphBottom-(graphBottom-graphTop)*population/maximum;};
+    const bool reveal=uiPageProgress<1.f;
+    if(reveal){
+      const float t=1.f-uiPageProgress;
+      const life::skia::Rect clip{graphLeft,graphTop-2,graphLeft+(graphRight-graphLeft)*(1.f-t*t*t),graphBottom+3};
+      api->canvasSave(canvas);
+      api->canvasClipRect(canvas,&clip,1,false);
+    }
+    for(size_t column=0;column<columns;++column){
+      const size_t first=begin+column*count/columns,last=begin+(column+1)*count/columns;
+      int low=renderAtlas->timeline[first].population,high=low;
+      for(size_t i=first+1;i<last;++i){const int value=renderAtlas->timeline[i].population;low=std::min(low,value);high=std::max(high,value);}
+      const float x=graphLeft+(graphRight-graphLeft)*column/std::max<size_t>(1,columns-1);
+      const float y=project(renderAtlas->timeline[first].population);
+      if(column)api->canvasDrawLine(canvas,previousX,previousY,x,y,paint);
+      api->canvasDrawLine(canvas,x,project(high),x,project(low)+1,paint);
+      previousX=x;previousY=project(renderAtlas->timeline[last-1].population);
+    }
+    if(reveal)api->canvasRestore(canvas);
+    const auto& latest=renderAtlas->timeline[end?end-1:0];text(canvas,paint,std::string("Population ")+std::to_string(latest.population)+"  Peak "+std::to_string(maximum)+"  O2 "+std::to_string(int(latest.oxygen*100))+"%  Species "+std::to_string(latest.species),graphLeft,bodyTop+20,11,0xffffffff);text(canvas,paint,"Wheel zoom · recent "+std::to_string(count)+" samples",graphLeft,bottom-84,10,0xff9099c2);int eventLine=0;for(auto event=renderAtlas->events.rbegin();event!=renderAtlas->events.rend()&&eventLine<3;++event,++eventLine)boundedText(canvas,paint,std::to_string(event->tick)+" · "+event->label,graphLeft,bottom-64+eventLine*16,9,0xffd7bd52,right-24);}
   else if(atlasTab==1){text(canvas,paint,"ID    Population   Peak   Parent   Diet   Biome   State",left+32,bodyTop+18,10,0xff81d2c7,true);int row=0;for(const auto& species:renderAtlas->species){if(row>=int((bottom-bodyTop-35)/22))break;const float y=bodyTop+32+row*22;rectangle(canvas,paint,left+24,y-15,right-24,y+5,species.id==renderAtlas->selectedSpecies?0xff416788:(row%2?0xff1b2938:0xff202d3b));std::ostringstream value;value<<"#"<<species.id<<"      "<<species.population<<"          "<<species.peakPopulation<<"      "<<(species.parentId<0?0:species.parentId)<<"       "<<int(species.dietMask)<<"  "<<(species.dominantTerrain==1?"Fertile":species.dominantTerrain==2?"Desert":"Plains")<<"  "<<(species.extinct?"Extinct":"Living");text(canvas,paint,value.str(),left+34,y,10,species.extinct?0xff9099c2:0xffffffff);++row;}}
   else if(atlasTab==2){text(canvas,paint,"Species ancestry",left+32,bodyTop+18,12,0xff81d2c7,true);int row=0;for(const auto& species:renderAtlas->species){if(row>=int((bottom-bodyTop-30)/20))break;const float y=bodyTop+42+row*20;const int depth=species.parentId<0?0:1;text(canvas,paint,std::string(depth*4,' ')+(species.parentId>=0?"↳ ":"")+"Species #"+std::to_string(species.id)+"  from #"+std::to_string(std::max(0,species.parentId))+(species.extinct?" †":""),left+40,y,10,species.extinct?0xff9099c2:0xffffffff);++row;}}
-  else {if(renderAtlas->timeline.empty()){text(canvas,paint,"Ecology sampling begins after 60 ticks.",left+40,bodyTop+38,12,0xff9099c2);return;}const auto& sample=renderAtlas->timeline.back();const std::array<std::string,10> lines{"Population "+std::to_string(sample.population)+" · Living species "+std::to_string(sample.species),"Resources  Plant "+std::to_string(sample.plant)+" · Carrion "+std::to_string(sample.carrion)+" · Mineral "+std::to_string(sample.mineral),"Diets  Plant "+std::to_string(sample.plantEaters)+" · Scavenger "+std::to_string(sample.scavengers)+" · Mineral "+std::to_string(sample.mineralEaters)+" · Decomposer "+std::to_string(sample.decomposers),"Predators "+std::to_string(sample.predators)+" · Critical respiration "+std::to_string(sample.criticalRespiratory),"Average energy "+std::to_string(int(sample.averageEnergy))+" · Body "+std::to_string(sample.averageBodySize)+" · Perception "+std::to_string(sample.averagePerceptionCost),"Soil nutrients "+std::to_string(sample.soilNutrients)+" · Poor tiles "+std::to_string(sample.nutrientPoorTiles)+" · Carrion processed "+std::to_string(sample.carrionProcessed)+" · Plants produced "+std::to_string(sample.plantProduced),"Atmosphere  O2 "+std::to_string(sample.oxygen*100)+"% · CO2 "+std::to_string(sample.carbonDioxide*100)+"%","Climate  Temperature "+std::to_string(sample.temperature)+" · Fertility "+std::to_string(sample.fertility),"Respiratory stress "+std::to_string(sample.averageRespiratoryStress),"Latest event  "+(renderAtlas->events.empty()?std::string("None"):renderAtlas->events.back().label)};for(size_t index=0;index<lines.size();++index)text(canvas,paint,lines[index],left+40,bodyTop+40+index*30,index==0?13:11,index==0?0xffffffff:0xffb8c3d1,index==0);}
+  else {if(renderAtlas->timeline.empty()){text(canvas,paint,"Ecology sampling begins after 60 ticks.",left+40,bodyTop+38,12,0xff9099c2);return;}const auto& sample=renderAtlas->timeline.back();const std::array<std::string,10> lines{"Population "+std::to_string(sample.population)+" · Living species "+std::to_string(sample.species),"Resources  Plant "+std::to_string(sample.plant)+" · Carrion "+std::to_string(sample.carrion)+" · Mineral "+std::to_string(sample.mineral),"Diets  Plant "+std::to_string(sample.plantEaters)+" · Scavenger "+std::to_string(sample.scavengers)+" · Mineral "+std::to_string(sample.mineralEaters)+" · Decomposer "+std::to_string(sample.decomposers),"Predators "+std::to_string(sample.predators)+" · Critical respiration "+std::to_string(sample.criticalRespiratory),"Average energy "+std::to_string(int(sample.averageEnergy))+" · Body "+std::to_string(sample.averageBodySize)+" · Perception "+std::to_string(sample.averagePerceptionCost),"Soil nutrients "+std::to_string(sample.soilNutrients)+" · Poor tiles "+std::to_string(sample.nutrientPoorTiles)+" · Carrion processed "+std::to_string(sample.carrionProcessed)+" · Plants produced "+std::to_string(sample.plantProduced),"Atmosphere  O2 "+std::to_string(sample.oxygen*100)+"% · CO2 "+std::to_string(sample.carbonDioxide*100)+"%","Climate  Temperature "+std::to_string(sample.temperature)+" · Fertility "+std::to_string(sample.fertility),"Respiratory stress "+std::to_string(sample.averageRespiratoryStress),"Latest event  "+(renderAtlas->events.empty()?std::string("None"):renderAtlas->events.back().label)};for(size_t index=0;index<lines.size()&&bodyTop+40+index*30<bottom-18;++index)boundedText(canvas,paint,lines[index],left+40,bodyTop+40+index*30,index==0?13:11,index==0?0xffffffff:0xffb8c3d1,right-24,index==0);}
 }
 
 #include "watch_ui.inc"
 #include "world_raster.inc"
 #include "research_ui.inc"
+#include "help_ui.inc"
 
 void render(HWND window, HDC dc) {
   uiCommands.complete();
@@ -300,53 +372,92 @@ void render(HWND window, HDC dc) {
   const RECT client=viewportBounds(window);
   const int width = std::max(1L, client.right), height = std::max(1L, client.bottom);
   if (width != surfaceWidth || height != surfaceHeight) {
+    releaseFrameCanvas();
     surfaceWidth = width; surfaceHeight = height; pixels.resize(size_t(width) * height);
     bitmap.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
     bitmap.bmiHeader.biWidth = width; bitmap.bmiHeader.biHeight = -height;
     bitmap.bmiHeader.biPlanes = 1; bitmap.bmiHeader.biBitCount = 32; bitmap.bmiHeader.biCompression = BI_RGB;
   }
   const life::skia::ImageInfo info{nullptr, width, height, 6, 2};
-  auto surface = api->surfaceNewRasterDirect(&info, pixels.data(), size_t(width) * 4, nullptr, nullptr, nullptr);
-  if (!surface) return;
-  auto canvas = api->surfaceGetCanvas(surface);
-  auto paint = api->paintNew();
+  if(!frameSurface)frameSurface=api->surfaceNewRasterDirect(&info,pixels.data(),size_t(width)*4,nullptr,nullptr,nullptr);
+  if(!frameSurface)return;
+  if(!framePaint)framePaint=api->paintNew();
+  auto canvas=api->surfaceGetCanvas(frameSurface);
+  auto paint=framePaint;
   api->canvasClear(canvas, 0xff3a4b68);
   const float aside = std::min(390.0f, width * .32f),contentRight=width-aside,headerHeight=82;
   const auto cameraNow=std::chrono::steady_clock::now();const double cameraSeconds=headlessFrameSeconds>=0?headlessFrameSeconds:std::chrono::duration<double>(cameraNow-previousCameraFrame).count();previousCameraFrame=cameraNow;
-  if(followCamera.target==renderWatchedPose.id){followCamera.offsetX=cameraX;followCamera.offsetY=cameraY;followCamera.advance(renderWatchedPose.x,renderWatchedPose.y,renderWatchedPose.alive,zoom,contentRight,height-headerHeight,cameraSeconds,atlasOpen||researchOpen);if(followCamera.following){cameraX=float(followCamera.offsetX);cameraY=float(followCamera.offsetY);}}
+  beginUiMotion(helpOpen?30+helpTab:researchOpen?20+researchPage:atlasOpen?10+atlasTab:0,std::clamp(cameraSeconds,0.,.10));
+  if(followCamera.target==renderWatchedPose.id){followCamera.offsetX=cameraX;followCamera.offsetY=cameraY;followCamera.advance(renderWatchedPose.x,renderWatchedPose.y,renderWatchedPose.alive,zoom,contentRight,height-headerHeight,cameraSeconds,atlasOpen||researchOpen||helpOpen);if(followCamera.following){cameraX=float(followCamera.offsetX);cameraY=float(followCamera.offsetY);}}
   rectangle(canvas,paint,0,0,contentRight,headerHeight,0xff416788);rectangle(canvas,paint,0,headerHeight,contentRight,float(height),0xff121d29);
   const bool wrappedView=followCamera.wrapped;const int worldStageTop=int(headerHeight);const float viewportCameraY=cameraY;
   const life::WorldViewAxis horizontal(life::WorldWidth,int(contentRight),zoom,cameraX,wrappedView),vertical(life::WorldHeight,height-worldStageTop,zoom,viewportCameraY,wrappedView);
   const int stageLeft=horizontal.begin,stageRight=horizontal.end,stageTop=worldStageTop+vertical.begin,stageBottom=worldStageTop+vertical.end;
 
   const auto rasterStart=std::chrono::steady_clock::now();
+  const bool worldVisible=!atlasOpen&&!researchOpen&&!helpOpen;
+  if(worldVisible){
   prepareWorldPalette();rasterColumns.assign(width,-1);rasterRows.assign(height,-1);
   for(int x=stageLeft;x<stageRight;++x)rasterColumns[x]=horizontal.sample(x);
   for(int y=stageTop;y<stageBottom;++y){const int sample=vertical.sample(y-worldStageTop);rasterRows[y]=sample>=0?sample*life::WorldWidth:-1;}
   const int rasterWidth=stageRight-stageLeft;const bool directRows=exactRowCopy&&zoom==1&&!(followCamera.target>=0&&familyHighlights)&&rasterWidth>0&&rasterColumns[stageLeft]>=0&&rasterColumns[stageRight-1]-rasterColumns[stageLeft]==rasterWidth-1;
   if(directRows){for(int y=stageTop;y<stageBottom;++y)if(rasterRows[y]>=0)std::copy_n(renderPalette.data()+rasterRows[y]+rasterColumns[stageLeft],rasterWidth,pixels.data()+size_t(y)*width+stageLeft);}
-  else {constexpr int rasterPartitions=10;renderWorkers->run([&](int partition){for(int y=stageTop+partition;y<stageBottom;y+=rasterPartitions){const int row=rasterRows[y];if(row<0)continue;auto* destination=pixels.data()+size_t(y)*width;for(int x=stageLeft;x<stageRight;++x){const int column=rasterColumns[x];if(column<0)continue;const int index=row+column;uint32_t color=renderPalette[index];if(followCamera.target>=0&&familyHighlights&&renderOwnersReady&&renderFamilyEdges[index])color=familyOutline(color,index,x,y,(x-cameraX)/zoom,(y-worldStageTop-viewportCameraY)/zoom);destination[x]=color;}}});}lastFrameWork.raster=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-rasterStart).count();const auto uiStart=std::chrono::steady_clock::now();
-  if(!atlasOpen&&followCamera.target>=0&&renderWatchedPose.id==followCamera.target){const double cx=(contentRight*.5-cameraX)/zoom,cy=((height-headerHeight)*.5-viewportCameraY)/zoom;const double wx=wrappedView?life::nearestWrapped(renderWatchedPose.x,cx,life::WorldWidth):renderWatchedPose.x,wy=wrappedView?life::nearestWrapped(renderWatchedPose.y,cy,life::WorldHeight):renderWatchedPose.y;const float x=float(cameraX+(wx+.5)*zoom),y=float(worldStageTop+viewportCameraY+(wy+.5)*zoom),radius=std::max(7.f,zoom*.8f);if(x-radius>=stageLeft&&x+radius<stageRight&&y-radius>=stageTop&&y+radius<stageBottom&&y+radius<height-28){for(int sx:{-1,1})for(int sy:{-1,1}){const float px=x+sx*radius,py=y+sy*radius;rectangle(canvas,paint,px-(sx>0?5:0),py,px+(sx<0?5:1),py+1,0xffe5c56f);rectangle(canvas,paint,px,py-(sy>0?5:0),px+1,py+(sy<0?5:1),0xffe5c56f);}}}
-  if(!atlasOpen&&!researchOpen)drawFollowCard(canvas,paint,contentRight);
+  else {constexpr int rasterPartitions=10;renderWorkers->run([&](int partition){for(int y=stageTop+partition;y<stageBottom;y+=rasterPartitions){const int row=rasterRows[y];if(row<0)continue;auto* destination=pixels.data()+size_t(y)*width;for(int x=stageLeft;x<stageRight;++x){const int column=rasterColumns[x];if(column<0)continue;const int index=row+column;uint32_t color=renderPalette[index];if(followCamera.target>=0&&familyHighlights&&renderOwnersReady&&renderFamilyEdges[index])color=familyOutline(color,index,x,y,(x-cameraX)/zoom,(y-worldStageTop-viewportCameraY)/zoom);destination[x]=color;}}});}
+  }else{
+    // Snapshot tiles can be replaced while a page covers the world.
+    if(!frameDirtyTiles.empty())frameCopiedAll=true;
+    if(!backgroundDirtyTiles.empty())backgroundCopiedAll=true;
+    frameDirtyTiles.clear();
+    backgroundDirtyTiles.clear();
+  }
+  lastFrameWork.raster=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-rasterStart).count();const auto uiStart=std::chrono::steady_clock::now();
+  if(worldVisible&&followCamera.target>=0&&renderWatchedPose.id==followCamera.target){const double cx=(contentRight*.5-cameraX)/zoom,cy=((height-headerHeight)*.5-viewportCameraY)/zoom;const double wx=wrappedView?life::nearestWrapped(renderWatchedPose.x,cx,life::WorldWidth):renderWatchedPose.x,wy=wrappedView?life::nearestWrapped(renderWatchedPose.y,cy,life::WorldHeight):renderWatchedPose.y;const float x=float(cameraX+(wx+.5)*zoom),y=float(worldStageTop+viewportCameraY+(wy+.5)*zoom),radius=std::max(7.f,zoom*.8f);if(x-radius>=stageLeft&&x+radius<stageRight&&y-radius>=stageTop&&y+radius<stageBottom&&y+radius<height-28){for(int sx:{-1,1})for(int sy:{-1,1}){const float px=x+sx*radius,py=y+sy*radius;rectangle(canvas,paint,px-(sx>0?5:0),py,px+(sx<0?5:1),py+1,0xffe5c56f);rectangle(canvas,paint,px,py-(sy>0?5:0),px+1,py+(sy<0?5:1),0xffe5c56f);}}}
+  if(!atlasOpen&&!researchOpen&&!helpOpen)drawFollowCard(canvas,paint,contentRight);
   // Save/load controls are drawn after the Atlas so they stay accessible.
-  text(canvas,paint,"EVOLUTION, ACCELERATED",30,30,10,0xff81d2c7,true);text(canvas,paint,"Life Engine",30,65,28,0xffffffff,true);text(canvas,paint,"NNUE",176,65,28,0xff81d2c7,true);text(canvas,paint,"v" LFE_VERSION_STRING,249,64,10,0xffb8c3d1);rectangle(canvas,paint,contentRight-210,25,contentRight-116,58,atlasOpen?0xff81d2c7:0xff3a4b68);text(canvas,paint,"ATLAS",contentRight-190,47,11,atlasOpen?0xff121d29:0xffffffff,true);rectangle(canvas,paint,contentRight-96,37,contentRight-88,45,paused.load()?0xff9099c2:0xff81d2c7);text(canvas,paint,paused.load()?"PAUSED":"RUNNING",contentRight-78,47,12,0xffffffff,false);
-  rectangle(canvas,paint,contentRight-316,25,contentRight-218,58,researchOpen?0xff81d2c7:0xff3a4b68);text(canvas,paint,"RESEARCH",contentRight-305,47,11,researchOpen?0xff121d29:0xffffffff,true);
+  boundedText(canvas,paint,"EVOLUTION, ACCELERATED",24,29,10,0xff81d2c7,contentRight-395,true);
+  boundedText(canvas,paint,"Life Engine",24,59,24,0xffffffff,157,true);
+  boundedText(canvas,paint,"NNUE",160,59,24,0xff81d2c7,contentRight-395,true);
+  boundedText(canvas,paint,"v" LFE_VERSION_STRING,25,74,9,0xffb8c3d1,contentRight-395);
+  uiButton(canvas,paint,contentRight-388,25,contentRight-324,58,helpOpen?0xff81d2c7:0xff3a4b68);
+  text(canvas,paint,"HELP",contentRight-373,47,11,helpOpen?0xff121d29:0xffffffff,true);
+  uiButton(canvas,paint,contentRight-210,25,contentRight-116,58,atlasOpen?0xff81d2c7:0xff3a4b68);text(canvas,paint,"ATLAS",contentRight-190,47,11,atlasOpen?0xff121d29:0xffffffff,true);rectangle(canvas,paint,contentRight-96,37,contentRight-88,45,paused.load()?0xff9099c2:0xff81d2c7);text(canvas,paint,paused.load()?"PAUSED":"RUNNING",contentRight-78,47,12,0xffffffff,false);
+  uiButton(canvas,paint,contentRight-316,25,contentRight-218,58,researchOpen?0xff81d2c7:0xff3a4b68);text(canvas,paint,"RESEARCH",contentRight-305,47,11,researchOpen?0xff121d29:0xffffffff,true);
   const float panelX=contentRight+15,panelRight=width-15,cardGap=8,cardWidth=(aside-38)/2;
   for (int column = 0; column < 2; ++column)
     for (int row = 0; row < 2; ++row) {
       const float left=panelX+column*(cardWidth+cardGap),top=15+row*76;rectangle(canvas,paint,left,top,left+cardWidth,top+68,0xffe1e3ec);
     }
-  const char* seasons[]={"Spring","Summer","Autumn","Winter"};const int season=int(std::floor(life::cyclePhase(metrics.ticks)*4))%4;std::ostringstream tpsText,fpsText;tpsText<<std::fixed<<std::setprecision(1)<<measuredTps;fpsText<<std::fixed<<std::setprecision(1)<<measuredFps;const std::string values[]={std::to_string(metrics.organisms),tpsText.str(),fpsText.str(),seasons[season]};const char* labels[]={"ORGANISMS","ACTUAL TPS","RENDER FPS","SEASON"};for(int i=0;i<4;++i){const float left=panelX+(i%2)*(cardWidth+cardGap),top=15+(i/2)*76;text(canvas,paint,labels[i],left+15,top+22,9,0xff416788);text(canvas,paint,values[i],left+15,top+53,26,0xff121d29,true);}
-  const bool isPaused=paused.load()||(researchSuite&&researchSuite->stopsSimulation());const int targetTps=requestedTps.load(),targetFps=requestedFps.load();float top=179;rectangle(canvas,paint,panelX,top,panelRight,top+240,0xffe1e3ec);text(canvas,paint,"Simulation",panelX+20,top+35,16,0xff121d29,true);rectangle(canvas,paint,panelRight-77,top+15,panelRight-20,top+48,0xff9099c2);text(canvas,paint,isPaused?"Resume":"Pause",panelRight-(isPaused?69:65),top+36,12,0xff000000,true);text(canvas,paint,"Requested simulation TPS",panelX+20,top+76,12,0xff3a4b68);text(canvas,paint,std::to_string(targetTps),panelRight-43,top+76,12,0xff416788);rectangle(canvas,paint,panelX+20,top+95,panelRight-20,top+99,0xff416788);const float thumbX=panelX+20+(panelRight-panelX-40)*(targetTps-1)/119.0f;rectangle(canvas,paint,thumbX-4,top+90,thumbX+4,top+104,0xff81d2c7);
-  text(canvas,paint,"FPS",panelX+20,top+131,10,0xff3a4b68,true);const float fpsLeft=panelX+53,fpsGap=3,fpsWidth=(panelRight-fpsLeft-20-fpsGap*5)/6;for(int i=0;i<12;++i){const int row=i/6,column=i%6,value=(i+1)*30;const float left=fpsLeft+column*(fpsWidth+fpsGap),buttonTop=top+108+row*24;rectangle(canvas,paint,left,buttonTop,left+fpsWidth,buttonTop+20,value==targetFps?0xff81d2c7:0xff9099c2);text(canvas,paint,std::to_string(value),left+5,buttonTop+14,8,0xff111111,true);}
-  constexpr const char* overlayNames[]={"Terrain","Resources","Productivity","Climate","Species","Nutrients","Decomposition","Signal A","Signal B","Disease","Development"};text(canvas,paint,"Overlay",panelX+20,top+177,11,0xff3a4b68);rectangle(canvas,paint,panelX+82,top+158,panelRight-20,top+184,0xffd5d8e4);text(canvas,paint,overlayNames[int(activeOverlay)],panelX+92,top+176,11,0xff121d29);const float half=(panelRight-panelX-45)/2;rectangle(canvas,paint,panelX+20,top+193,panelX+20+half,top+228,0xff9099c2);rectangle(canvas,paint,panelX+25+half,top+193,panelRight-20,top+228,0xff9099c2);text(canvas,paint,"Reset life",panelX+34,top+215,10,0xff111111,true);text(canvas,paint,"New seeded world",panelX+34+half,top+215,9,0xff111111,true);
-  top=411;rectangle(canvas,paint,panelX,top,panelRight,top+162,0xffe1e3ec);text(canvas,paint,"World tools",panelX+20,top+35,16,0xff121d29,true);const char* tools[]={"Inspect","Pan","Plant","Carrion","Mineral","Fertile","Desert","Water","Mountain","Nutrients"};for(int i=0;i<10;++i){const int row=i/6,column=i%6;const float buttonWidth=(aside-75)/6,left=panelX+20+column*(buttonWidth+5),buttonTop=top+52+row*38;rectangle(canvas,paint,left,buttonTop,left+buttonWidth,buttonTop+31,i==int(activeTool)?0xff81d2c7:0xff9099c2);text(canvas,paint,tools[i],left+4,buttonTop+20,8,0xff111111,true);}
-  top=585;rectangle(canvas,paint,panelX,top,panelRight,float(height-15),0xffe1e3ec);text(canvas,paint,"Evolution Observatory",panelX+20,top+35,16,0xff121d29,true);rectangle(canvas,paint,panelRight-62,top+13,panelRight-20,top+42,0xff9099c2);text(canvas,paint,"Clear",panelRight-56,top+32,9,0xff111111,true);if(inspection){std::ostringstream identity,energy,health,brain,place,decomposition,neural,mutation,development,infection;development<<life::stageName(inspection->stage)<<" | Incubation "<<inspection->genes.incubation<<" | Growth "<<inspection->genes.growthInterval<<" | Investment "<<inspection->genes.investment/10.0<<"% | Shell "<<inspection->genes.shell;infection<<"Infection "<<int(inspection->infection*100)<<"% | Resistance "<<int(inspection->immunity*100)<<"% | Recovery "<<inspection->genes.infectionRecovery<<" | Signals "<<int(inspection->genes.emission[0])<<"/"<<int(inspection->genes.emission[1]);identity<<"#"<<inspection->id<<" · "<<inspection->diet<<" · "<<(inspection->alive?"Alive":"Dead");if(!inspection->alive&&!inspection->deathCause.empty())identity<<" ("<<inspection->deathCause<<")";energy<<"Energy "<<std::fixed<<std::setprecision(1)<<inspection->energy/1000.0<<"  Minerals "<<inspection->minerals<<"  Age "<<inspection->age<<"  Body "<<inspection->cellCount<<"  Damage "<<inspection->damage;health<<"Resp "<<std::setprecision(1)<<inspection->respiratoryStress*100<<"%  Risk "<<inspection->respiratoryRisk*100<<"%  O2 tol "<<inspection->oxygenTolerance*100<<"%  Recovery "<<inspection->stressRecovery*100<<"%  Frailty "<<inspection->frailty;brain<<"Radius "<<inspection->perceptionRadius<<"  Channels 0x"<<std::hex<<int(inspection->senseChannels)<<std::dec<<"  Cost "<<inspection->neuralCost;decomposition<<"Decomposition  Carrion "<<inspection->carrionConsumed<<"  Nutrients "<<inspection->nutrientsReleased<<"  Energy "<<inspection->decompositionEnergy<<"  Local soil "<<inspection->localNutrients;place<<inspection->terrain<<" · "<<inspection->resource<<"  Temp "<<std::fixed<<std::setprecision(2)<<inspection->temperature<<"  Fertility "<<inspection->fertility<<"  Thermal "<<inspection->thermalStress*100<<"%";neural<<"Action "<<inspection->action;if(inspection->hasOutputs){neural<<" [";for(int i=0;i<life::OutputSize;++i){if(i)neural<<", ";neural<<std::setprecision(2)<<inspection->outputs[i];}neural<<"]";}mutation<<"Mutations "<<inspection->mutations.size()<<": "<<(inspection->mutations.empty()?"None":inspection->mutations.back());const std::array<std::string,13> lines{identity.str(),energy.str(),development.str(),infection.str(),health.str(),brain.str(),place.str(),decomposition.str(),"Ancestors: "+lineageIds(inspection->ancestors),"Descendants: "+lineageIds(inspection->descendants),"Senses: "+featureIds(inspection->senses),neural.str(),mutation.str()};for(size_t line=0;line<lines.size();++line)text(canvas,paint,line==0?lines[line].substr(0,29):lines[line],panelX+20,top+62+float(line)*17,line==0?12:9,line==0?0xff121d29:0xff3a4b68,line==0);}else{text(canvas,paint,"Select a creature.",panelX+20,top+68,12,0xff66738a);}
-  if(inspection){rectangle(canvas,paint,panelRight-86,632,panelRight-20,656,followCamera.following?0xff81d2c7:0xff9099c2);text(canvas,paint,followCamera.following?"Release":"Follow (F)",panelRight-80,648,10,0xff121d29,true);}
-  std::ostringstream populationSummary,performanceSummary;populationSummary<<"Plant "<<metrics.plantEaters<<" · Carrion "<<metrics.scavengers<<" · Mineral "<<metrics.mineralEaters<<" · Decomp "<<metrics.decomposers<<" · Predators "<<metrics.predators;performanceSummary<<"O2 "<<std::fixed<<std::setprecision(1)<<metrics.oxygen*100<<"% · Energy "<<metrics.averageEnergy<<" · Soil/biomes";rectangle(canvas,paint,panelX,float(height-61),panelRight,float(height-15),0xff121d29);text(canvas,paint,populationSummary.str(),panelX+10,float(height-42),9,0xffffffff);text(canvas,paint,performanceSummary.str(),panelX+10,float(height-24),9,0xff81d2c7);
-  rectangle(canvas,paint,24,float(height-52),320,float(height-20),0xee121d29);text(canvas,paint,"Terrain + resources + evolving organisms",38,float(height-31),11,0xffffffff);if(atlasOpen)renderAtlasView(canvas,paint,0,headerHeight,contentRight,float(height));if(researchOpen)drawResearch(canvas,paint,contentRight,float(height));
-  rectangle(canvas,paint,20,float(height-28),103,float(height-4),0xff416788);text(canvas,paint,"Save (F5)",30,float(height-12),10,0xffffffff);rectangle(canvas,paint,109,float(height-28),192,float(height-4),0xff416788);text(canvas,paint,"Load (F9)",119,float(height-12),10,0xffffffff);text(canvas,paint,saveStatus,205,float(height-12),10,0xffb8c3d1);
-  api->paintDelete(paint);api->surfaceUnref(surface);
+  const char* seasons[]={"Spring","Summer","Autumn","Winter"};const int season=int(std::floor(life::cyclePhase(metrics.ticks)*4))%4;std::ostringstream tpsText,fpsText;tpsText<<std::fixed<<std::setprecision(1)<<measuredTps;fpsText<<std::fixed<<std::setprecision(1)<<measuredFps;const std::string values[]={std::to_string(metrics.organisms),tpsText.str(),fpsText.str(),seasons[season]};const char* labels[]={"ORGANISMS","ACTUAL TPS","RENDER FPS","SEASON"};for(int i=0;i<4;++i){const float left=panelX+(i%2)*(cardWidth+cardGap),top=15+(i/2)*76;text(canvas,paint,labels[i],left+15,top+22,9,0xff416788);boundedText(canvas,paint,values[i],left+15,top+53,26,0xff121d29,left+cardWidth-8,true);}
+  const bool isPaused=paused.load()||(researchSuite&&researchSuite->stopsSimulation());const int targetTps=requestedTps.load(),targetFps=requestedFps.load();float top=179;rectangle(canvas,paint,panelX,top,panelRight,top+255,0xffe1e3ec);text(canvas,paint,"Simulation",panelX+20,top+35,16,0xff121d29,true);uiButton(canvas,paint,panelRight-77,top+15,panelRight-20,top+48,0xff9099c2);text(canvas,paint,isPaused?"Resume":"Pause",panelRight-(isPaused?69:65),top+36,12,0xff000000,true);text(canvas,paint,"Requested simulation TPS",panelX+20,top+76,12,0xff3a4b68);text(canvas,paint,std::to_string(targetTps),panelRight-43,top+76,12,0xff416788);rectangle(canvas,paint,panelX+20,top+95,panelRight-20,top+99,0xff416788);const float thumbX=panelX+20+(panelRight-panelX-40)*(targetTps-1)/119.0f;rectangle(canvas,paint,thumbX-4,top+90,thumbX+4,top+104,0xff81d2c7);
+  text(canvas,paint,"FPS",panelX+20,top+131,10,0xff3a4b68,true);const float fpsLeft=panelX+53,fpsGap=3,fpsWidth=(panelRight-fpsLeft-20-fpsGap*5)/6;for(int i=0;i<12;++i){const int row=i/6,column=i%6,value=(i+1)*30;const float left=fpsLeft+column*(fpsWidth+fpsGap),buttonTop=top+108+row*24;uiButton(canvas,paint,left,buttonTop,left+fpsWidth,buttonTop+20,value==targetFps?0xff81d2c7:0xff9099c2);text(canvas,paint,std::to_string(value),left+5,buttonTop+14,8,0xff111111,true);}
+  constexpr const char* overlayNames[]={"Terrain","Resources","Productivity","Climate","Species","Nutrients","Decomposition","Signal A","Signal B","Disease","Development"};text(canvas,paint,"Overlay",panelX+20,top+177,11,0xff3a4b68);uiButton(canvas,paint,panelX+82,top+158,panelRight-20,top+184,0xffd5d8e4);text(canvas,paint,overlayNames[int(activeOverlay)],panelX+92,top+176,11,0xff121d29);const float half=(panelRight-panelX-45)/2;uiButton(canvas,paint,panelX+20,top+193,panelX+20+half,top+228,0xff9099c2);uiButton(canvas,paint,panelX+25+half,top+193,panelRight-20,top+228,0xff9099c2);text(canvas,paint,"Reset life",panelX+34,top+215,10,0xff111111,true);text(canvas,paint,"New seeded world",panelX+34+half,top+215,9,0xff111111,true);
+  rectangle(canvas,paint,panelX+20,412,panelX+34,426,0xff9099c2);
+  if(metrics.moverProducersEnabled)rectangle(canvas,paint,panelX+23,415,panelX+31,423,0xff121d29);
+  boundedText(canvas,paint,"Movers can have working Producer Cells",panelX+41,423,10,0xff121d29,panelRight-12);
+  top=438;rectangle(canvas,paint,panelX,top,panelRight,top+162,0xffe1e3ec);text(canvas,paint,"World tools",panelX+20,top+35,16,0xff121d29,true);const char* tools[]={"Inspect","Pan","Plant","Carrion","Mineral","Fertile","Desert","Water","Mountain","Nutrients"};for(int i=0;i<10;++i){const int row=i/5,column=i%5;const float buttonWidth=(panelRight-panelX-60)/5,left=panelX+20+column*(buttonWidth+5),buttonTop=top+52+row*38;uiButton(canvas,paint,left,buttonTop,left+buttonWidth,buttonTop+31,i==int(activeTool)?0xff81d2c7:0xff9099c2);boundedText(canvas,paint,tools[i],left+3,buttonTop+20,8,0xff111111,left+buttonWidth-2,true);}
+  if(height>=710){
+  top=612;rectangle(canvas,paint,panelX,top,panelRight,float(height-15),0xffe1e3ec);boundedText(canvas,paint,"Evolution Observatory",panelX+20,top+25,14,0xff121d29,panelRight-20,true);uiButton(canvas,paint,panelRight-62,top+34,panelRight-20,top+57,0xff9099c2);text(canvas,paint,"Clear",panelRight-56,top+49,9,0xff111111,true);if(inspection){std::ostringstream identity,energy,health,brain,place,decomposition,neural,mutation,development,infection;development<<life::stageName(inspection->stage)<<" | Incubation "<<inspection->genes.incubation<<" | Growth "<<inspection->genes.growthInterval<<" | Investment "<<inspection->genes.investment/10.0<<"% | Shell "<<inspection->genes.shell;infection<<"Infection "<<int(inspection->infection*100)<<"% | Resistance "<<int(inspection->immunity*100)<<"% | Recovery "<<inspection->genes.infectionRecovery<<" | Signals "<<int(inspection->genes.emission[0])<<"/"<<int(inspection->genes.emission[1]);identity<<"#"<<inspection->id<<" · "<<inspection->diet<<" · "<<(inspection->alive?"Alive":"Dead");if(!inspection->alive&&!inspection->deathCause.empty())identity<<" ("<<inspection->deathCause<<")";energy<<"Energy "<<std::fixed<<std::setprecision(1)<<inspection->energy/1000.0<<"  Minerals "<<inspection->minerals<<"  Age "<<inspection->age<<"  Body "<<inspection->cellCount<<"  Damage "<<inspection->damage;health<<"Resp "<<std::setprecision(1)<<inspection->respiratoryStress*100<<"%  Risk "<<inspection->respiratoryRisk*100<<"%  O2 tol "<<inspection->oxygenTolerance*100<<"%  Recovery "<<inspection->stressRecovery*100<<"%  Frailty "<<inspection->frailty;brain<<"Radius "<<inspection->perceptionRadius<<"  Channels 0x"<<std::hex<<int(inspection->senseChannels)<<std::dec<<"  Cost "<<inspection->neuralCost;decomposition<<"Decomposition  Carrion "<<inspection->carrionConsumed<<"  Nutrients "<<inspection->nutrientsReleased<<"  Energy "<<inspection->decompositionEnergy<<"  Local soil "<<inspection->localNutrients;place<<inspection->terrain<<" · "<<inspection->resource<<"  Temp "<<std::fixed<<std::setprecision(2)<<inspection->temperature<<"  Fertility "<<inspection->fertility<<"  Thermal "<<inspection->thermalStress*100<<"%";neural<<"Action "<<inspection->action;if(inspection->hasOutputs){neural<<" [";for(int i=0;i<life::OutputSize;++i){if(i)neural<<", ";neural<<std::setprecision(2)<<inspection->outputs[i];}neural<<"]";}mutation<<"Mutations "<<inspection->mutations.size()<<": "<<(inspection->mutations.empty()?"None":inspection->mutations.back());const std::array<std::string,13> lines{identity.str(),energy.str(),development.str(),infection.str(),health.str(),brain.str(),place.str(),decomposition.str(),"Ancestors: "+lineageIds(inspection->ancestors),"Descendants: "+lineageIds(inspection->descendants),"Senses: "+featureIds(inspection->senses),neural.str(),mutation.str()};for(size_t line=0;line<lines.size()&&top+78+float(line)*17<height-68;++line)boundedText(canvas,paint,lines[line],panelX+20,top+78+float(line)*17,line==0?12:9,line==0?0xff121d29:0xff3a4b68,panelRight-14,line==0);}else if(top+78<height-68){text(canvas,paint,"Select a creature.",panelX+20,top+78,12,0xff66738a);}
+  if(inspection){uiButton(canvas,paint,panelX+20,646,panelX+88,669,followCamera.following?0xff81d2c7:0xff9099c2);text(canvas,paint,followCamera.following?"Release":"Follow (F)",panelX+26,661,10,0xff121d29,true);}
+  }
+  if(height>=750){
+    const std::string diets="Plant "+std::to_string(metrics.plantEaters)+" · Carrion "+std::to_string(metrics.scavengers)+" · Mineral "+std::to_string(metrics.mineralEaters)+" · Decomp "+std::to_string(metrics.decomposers)+" · Predators "+std::to_string(metrics.predators);
+    rectangle(canvas,paint,panelX,height-61,panelRight,height-15,0xff121d29);
+    boundedText(canvas,paint,diets,panelX+10,height-42,9,0xffffffff,panelRight-10);
+    std::ostringstream atmosphere;
+    atmosphere<<"O2 "<<std::fixed<<std::setprecision(1)<<metrics.oxygen*100<<"% · Energy "<<metrics.averageEnergy;
+    boundedText(canvas,paint,atmosphere.str(),panelX+10,height-24,9,0xff81d2c7,panelRight-10);
+  }
+  if(helpOpen)drawHelp(canvas,paint,contentRight,float(height));
+  else if(atlasOpen)renderAtlasView(canvas,paint,0,headerHeight,contentRight,float(height-28));
+  else if(researchOpen)drawResearch(canvas,paint,contentRight,float(height));
+  if(!worldVisible&&uiPageProgress<1.f){
+    const float remaining=1.f-uiPageProgress;
+    rectangle(canvas,paint,0,82,contentRight,height-28,
+              (uint32_t(remaining*remaining*144)<<24)|0x121d29);
+  }
+  rectangle(canvas,paint,0,float(height-28),contentRight,float(height),0xff121d29);
+  uiButton(canvas,paint,20,float(height-28),103,float(height-4),0xff416788);text(canvas,paint,"Save (F5)",30,float(height-12),10,0xffffffff);uiButton(canvas,paint,109,float(height-28),192,float(height-4),0xff416788);text(canvas,paint,"Load (F9)",119,float(height-12),10,0xffffffff);boundedText(canvas,paint,saveStatus,205,float(height-12),10,0xffb8c3d1,contentRight-10);
+
   lastFrameWork.ui=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-uiStart).count();
   const auto beforePresent=std::chrono::steady_clock::now();if(headlessMode&&framePresentationDeadline!=std::chrono::steady_clock::time_point{}){static thread_local life::FramePacer pacer(0);pacer.until(framePresentationDeadline);}lastFrameWork.presentWait=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-beforePresent).count();
   if(!headlessMode)StretchDIBits(dc, 0, 0, width, height, 0, 0, width, height, pixels.data(), &bitmap, DIB_RGB_COLORS, SRCCOPY);
@@ -359,8 +470,19 @@ void writeDetailedBenchmarkReport(){const auto power=life::performancePowerState
 
 LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
   if(message==WM_TIMER&&uiBenchmark){const auto power=life::performancePowerState();if(!power.eligible()){std::ofstream(libraryPath().parent_path()/"ui-benchmark.txt")<<"validation=DEFERRED reason="<<power.reason();DestroyWindow(window);return 0;}}
+  if(message==WM_KEYDOWN&&(wParam==VK_F1||(wParam=='H'&&(!researchOpen||researchFocus<0))||(wParam==VK_ESCAPE&&helpOpen))){
+    toggleHelp();ReleaseCapture();InvalidateRect(window,nullptr,FALSE);return 0;
+  }
   if((message==WM_KEYDOWN||message==WM_CHAR)&&researchKey(message,wParam)){InvalidateRect(window,nullptr,FALSE);return 0;}
-  if(message==WM_KEYDOWN&&wParam=='R'){researchToggle();ReleaseCapture();InvalidateRect(window,nullptr,FALSE);return 0;}
+  if(message==WM_KEYDOWN&&wParam=='R'){helpOpen=false;researchToggle();ReleaseCapture();InvalidateRect(window,nullptr,FALSE);return 0;}
+  if(message==WM_MOUSEMOVE){
+    senseHover={GET_X_LPARAM(lParam),GET_Y_LPARAM(lParam)};
+    TRACKMOUSEEVENT track{sizeof(TRACKMOUSEEVENT),TME_LEAVE,window,0};
+    TrackMouseEvent(&track);
+  }
+  if(message==WM_MOUSELEAVE){senseHover={-1,-1};uiPointerDown=false;}
+  if(message==WM_CAPTURECHANGED)uiPointerDown=false;
+  if(message==WM_LBUTTONDOWN){senseHover={GET_X_LPARAM(lParam),GET_Y_LPARAM(lParam)};uiPointerDown=true;}
   if (message == WM_PAINT) { PAINTSTRUCT paint{};HDC dc=BeginPaint(window,&paint);scheduledPaint=false;lastPresentedFrame=std::chrono::steady_clock::now();render(window,dc);EndPaint(window,&paint);return 0; }
   if (message == PresentMessage) {presentationPending.store(false);if(uiBenchmark&&std::chrono::duration<double>(std::chrono::steady_clock::now()-uiBenchmarkStart).count()>=uiBenchmarkSeconds){writeDetailedBenchmarkReport();DestroyWindow(window);return 0;}framePresentationDeadline=std::chrono::steady_clock::time_point(std::chrono::steady_clock::duration(requestedPresentationTime.load()));scheduledPaint=true;InvalidateRect(window,nullptr,FALSE);UpdateWindow(window);return 0; }
   if (message == WM_SIZE) { InvalidateRect(window, nullptr, FALSE); return 0; }
@@ -369,9 +491,16 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wParam, LPARAM lPar
   if(message==WM_KEYDOWN&&wParam=='C'){compactFollow=!compactFollow;return 0;}
   if(message==WM_KEYDOWN&&wParam=='D'){if(!renderWatchedPose.alive)followDescendant(window);return 0;}
   if(message==WM_KEYDOWN&&(wParam==VK_OEM_4||wParam==VK_OEM_6)){if(wParam==VK_OEM_4)watchedHistoryOffset=std::min<size_t>(127,watchedHistoryOffset+1);else if(watchedHistoryOffset)--watchedHistoryOffset;nextWatchDiagnostics={};return 0;}
+  if(message==WM_GETMINMAXINFO){
+    RECT minimum{0,0,960,640};
+    AdjustWindowRectEx(&minimum,DWORD(GetWindowLongPtrW(window,GWL_STYLE)),FALSE,DWORD(GetWindowLongPtrW(window,GWL_EXSTYLE)));
+    auto* limits=reinterpret_cast<MINMAXINFO*>(lParam);
+    limits->ptMinTrackSize={minimum.right-minimum.left,minimum.bottom-minimum.top};
+    return 0;
+  }
   if(message==PersistenceMessage){std::unique_ptr<PersistenceResult> result(reinterpret_cast<PersistenceResult*>(lParam));saveStatus=result->message;if(result->loaded&&result->success){{const auto view=result->view;zoom=std::clamp(view.zoom,.2f,12.f);cameraX=view.cameraX;cameraY=view.cameraY;activeOverlay=Overlay(std::clamp(view.overlay,0,6));selectedId=view.selectedOrganism;atlasOpen=view.atlasOpen;atlasTab=std::clamp(view.atlasTab,0,3);atlasTimelineWindow=std::clamp(view.timelineWindow,120,24000);requestedFps=std::clamp(view.fps/30,1,12)*30;setRequestedTps(view.tps);paused=view.paused;activeTool=Tool(std::clamp(view.tool,0,9));nextWorldSeed=view.nextWorldSeed;clearFollowing(true);const auto preferences=result->preferences;familyHighlights=preferences.family;compactFollow=preferences.compact;followCamera.target=preferences.target;followCamera.wrapped=preferences.wrapped;followCamera.following=preferences.enabled;const auto pose=result->pose;RECT bounds{};GetClientRect(window,&bounds);followCamera.anchorX=life::nearestWrapped(pose.x,(bounds.right-std::min(390.,bounds.right*.32))*.5/zoom-cameraX/zoom,life::WorldWidth);followCamera.anchorY=life::nearestWrapped(pose.y,(bounds.bottom-82)*.5/zoom-cameraY/zoom,life::WorldHeight);}renderDirtyVersions.clear();renderAtlasRevision=UINT64_MAX;measuredTicks=0;}persistenceBusy=false;InvalidateRect(window,nullptr,FALSE);return 0;}
   if(message==WM_KEYDOWN&&(wParam==VK_F5||wParam==VK_F9)){if(researchSuite&&researchSuite->busy()){saveStatus="Wait for the research operation";return 0;}if(persistenceBusy.exchange(true))return 0;const bool loading=wParam==VK_F9;auto savePath=life::appDataDirectory()/"world.lfesave";if(GetKeyState(VK_SHIFT)<0){wchar_t filename[32768]{};OPENFILENAMEW dialog{};dialog.lStructSize=sizeof(dialog);dialog.hwndOwner=window;dialog.lpstrFile=filename;dialog.nMaxFile=32768;dialog.lpstrFilter=L"Life Engine world (*.lfesave)\0*.lfesave\0\0";dialog.lpstrDefExt=L"lfesave";dialog.Flags=OFN_NOCHANGEDIR|OFN_PATHMUSTEXIST|(loading?OFN_FILEMUSTEXIST:OFN_OVERWRITEPROMPT);if(!(loading?GetOpenFileNameW(&dialog):GetSaveFileNameW(&dialog))){persistenceBusy=false;return 0;}savePath=filename;}const life::NativeSimulation::SavedView view{zoom,cameraX,cameraY,int(activeOverlay),selectedId,requestedFps.load(),requestedTps.load(),atlasTab,atlasTimelineWindow,false,atlasOpen,paused.load(),int(activeTool),nextWorldSeed,false};const life::FollowPreferences preferences{followCamera.target,followCamera.following,familyHighlights,compactFollow,followCamera.wrapped};saveStatus=loading?"Loading world...":"Saving world...";researchSuite->enqueue([window,loading,view,savePath,preferences]{auto result=std::make_unique<PersistenceResult>();result->loaded=loading;try{std::unique_lock lock(simulationMutex);const auto path=savePath;std::filesystem::create_directories(path.parent_path());if(loading){simulation.load(path);result->view=simulation.savedView;result->preferences=simulation.followPreferences;result->pose=simulation.watchedPose();invalidatePresentation();publishSimulationFrame(true);}else{simulation.savedView=view;simulation.followPreferences=preferences;simulation.save(path);}result->success=true;result->message=loading?"World loaded":"World saved";}catch(const std::exception& error){result->message=error.what();life::logMessage(result->message);}if(PostMessageW(window,PersistenceMessage,0,reinterpret_cast<LPARAM>(result.get())))result.release();});return 0;}
-  if(message==WM_KEYDOWN&&(wParam=='A'||wParam=='a')){atlasOpen=!atlasOpen;researchOpen=false;InvalidateRect(window,nullptr,FALSE);return 0;}
+  if(message==WM_KEYDOWN&&(wParam=='A'||wParam=='a')){helpOpen=false;atlasOpen=!atlasOpen;researchOpen=false;InvalidateRect(window,nullptr,FALSE);return 0;}
   if (message == WM_TIMER) {
     const auto now=std::chrono::steady_clock::now();
     if(uiBenchmark&&now>=nextBenchmarkInput){std::unique_lock lock(simulationMutex,std::try_to_lock);if(lock.owns_lock()){const int x=int((uiBenchmarkInputs*37)%life::WorldWidth),y=int((uiBenchmarkInputs*53)%life::WorldHeight);simulation.paintResource(x,y,life::ResourceType::Plant,1000);++uiBenchmarkInputs;if(followBenchmark){benchmarkFamilyPeak=std::max(benchmarkFamilyPeak,renderWatched.livingDescendants);if(!renderWatchedPose.alive&&renderWatched.nextDescendant>=0){selectedId=renderWatched.nextDescendant;simulation.select(selectedId);simulation.watch(selectedId);followCamera.clear();}}pendingInput=now;nextBenchmarkInput=now+std::chrono::milliseconds(250);InvalidateRect(window,nullptr,FALSE);}}if(followBenchmark&&!followCamera.following&&renderWatchedPose.alive&&followCamera.target<0)toggleFollowing(window);
@@ -379,39 +508,54 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wParam, LPARAM lPar
     lastRenderRequest=now;if(uiBenchmark&&std::chrono::duration<double>(now-uiBenchmarkStart).count()>=uiBenchmarkSeconds){writeDetailedBenchmarkReport();DestroyWindow(window);}return 0;
   }
   if(message==WM_LBUTTONDOWN){RECT client{};GetClientRect(window,&client);if(GET_Y_LPARAM(lParam)>=client.bottom-28&&GET_X_LPARAM(lParam)>=20&&GET_X_LPARAM(lParam)<=192){SendMessageW(window,WM_KEYDOWN,GET_X_LPARAM(lParam)<=103?VK_F5:VK_F9,0);return 0;}}
-  if(message==WM_LBUTTONDOWN&&!atlasOpen&&followCamera.target>=0){const RECT bounds=viewportBounds(window);const life::FollowHudLayout layout(bounds.right-std::min(390.f,bounds.right*.32f),compactFollow);const int which=layout.buttonAt(float(GET_X_LPARAM(lParam)),float(GET_Y_LPARAM(lParam)));if(which>=0){if(which==0)toggleFollowing(window);else if(which==1)familyHighlights=!familyHighlights;else if(which==2)compactFollow=!compactFollow;else if(which==3&&!renderWatchedPose.alive)followDescendant(window);return 0;}}
+  if(message==WM_LBUTTONDOWN&&!atlasOpen&&!researchOpen&&!helpOpen&&followCamera.target>=0){const RECT bounds=viewportBounds(window);const life::FollowHudLayout layout(bounds.right-std::min(390.f,bounds.right*.32f),compactFollow);const int which=layout.buttonAt(float(GET_X_LPARAM(lParam)),float(GET_Y_LPARAM(lParam)));if(which>=0){if(which==0)toggleFollowing(window);else if(which==1)familyHighlights=!familyHighlights;else if(which==2)compactFollow=!compactFollow;else if(which==3&&!renderWatchedPose.alive)followDescendant(window);return 0;}}
   if (message == WM_LBUTTONDOWN || message == WM_MBUTTONDOWN) {
     const int mouseX=GET_X_LPARAM(lParam),mouseY=GET_Y_LPARAM(lParam);RECT client{};GetClientRect(window,&client);const float aside=std::min(390.0f,client.right*.32f),contentRight=client.right-aside,panelX=contentRight+15,panelRight=client.right-15;
-    if(message==WM_LBUTTONDOWN&&mouseY>=25&&mouseY<=58&&mouseX>=contentRight-316&&mouseX<=contentRight-218){researchToggle();InvalidateRect(window,nullptr,FALSE);return 0;}
+    if(message==WM_LBUTTONDOWN&&mouseY>=25&&mouseY<=58&&mouseX>=contentRight-388&&mouseX<=contentRight-324){
+      toggleHelp();InvalidateRect(window,nullptr,FALSE);return 0;
+    }
+    if(helpOpen&&mouseY>=82&&mouseX<contentRight){
+      if(message==WM_LBUTTONDOWN&&mouseY>=158&&mouseY<190&&mouseX>=24&&mouseX<contentRight-24)
+        helpTab=std::clamp(int((mouseX-24)/((contentRight-48)/helpTabs.size())),0,int(helpTabs.size())-1);
+      InvalidateRect(window,nullptr,FALSE);return 0;
+    }
+    if(message==WM_LBUTTONDOWN&&mouseY>=25&&mouseY<=58&&mouseX>=contentRight-316&&mouseX<=contentRight-218){helpOpen=false;researchToggle();InvalidateRect(window,nullptr,FALSE);return 0;}
     if(message==WM_LBUTTONDOWN&&researchClick(window,mouseX,mouseY,contentRight,float(client.bottom))){InvalidateRect(window,nullptr,FALSE);return 0;}
-    if(message==WM_LBUTTONDOWN&&mouseY>=632&&mouseY<=656&&mouseX>=panelRight-86&&mouseX<=panelRight-20){toggleFollowing(window);return 0;}
-    if(message==WM_LBUTTONDOWN&&!atlasOpen&&followCamera.target>=0&&life::FollowHudLayout(contentRight,compactFollow).contains(float(mouseX),float(mouseY)))return 0;
+    if(message==WM_LBUTTONDOWN&&client.bottom>=710&&mouseY>=646&&mouseY<=669&&mouseX>=panelX+20&&mouseX<=panelX+88){toggleFollowing(window);return 0;}
+    if(message==WM_LBUTTONDOWN&&!atlasOpen&&!researchOpen&&!helpOpen&&followCamera.target>=0&&life::FollowHudLayout(contentRight,compactFollow).contains(float(mouseX),float(mouseY)))return 0;
     if(message==WM_LBUTTONDOWN&&atlasOpen&&mouseX<contentRight&&mouseY>=150){const float tabWidth=(contentRight-48)/4.0f;if(mouseY<=182){atlasTab=std::clamp(int((mouseX-24)/tabWidth),0,3);}else if(atlasTab==1&&mouseY>=212&&!persistenceBusy.load()){const int row=(mouseY-212)/22;if(row>=0&&row<int(renderAtlas->species.size())){const auto species=renderAtlas->species[size_t(row)];selectUi(species.representativeId);submitUi([id=species.id]()->life::UiCommands::Reply{simulation.selectSpecies(id);publishSimulationFrame(true);return {};});}}InvalidateRect(window,nullptr,FALSE);return 0;}
-    if(message==WM_LBUTTONDOWN&&mouseY>=25&&mouseY<=58&&mouseX>=contentRight-210&&mouseX<=contentRight-116){atlasOpen=!atlasOpen;researchOpen=false;InvalidateRect(window,nullptr,FALSE);return 0;}
+    if(message==WM_LBUTTONDOWN&&mouseY>=25&&mouseY<=58&&mouseX>=contentRight-210&&mouseX<=contentRight-116){helpOpen=false;atlasOpen=!atlasOpen;researchOpen=false;InvalidateRect(window,nullptr,FALSE);return 0;}
     if(message==WM_LBUTTONDOWN&&mouseX>=contentRight){
       if(mouseY>=194&&mouseY<=227&&mouseX>=panelRight-77&&mouseX<=panelRight-20){paused.store(!paused.load());}
       else if(mouseY>=269&&mouseY<=288&&mouseX>=panelX+20&&mouseX<=panelRight-20){draggingTps=true;SetCapture(window);setRequestedTps(1+int((mouseX-(panelX+20))*119/std::max(1.0f,panelRight-panelX-40)));}
       else if(mouseY>=287&&mouseY<331){const float fpsLeft=panelX+53,fpsGap=3,fpsWidth=(panelRight-fpsLeft-20-fpsGap*5)/6;const int row=(mouseY-287)/24,column=int((mouseX-fpsLeft)/(fpsWidth+fpsGap));if(mouseX>=fpsLeft&&column>=0&&column<6)requestedFps.store((row*6+column+1)*30);}
       else if(mouseY>=337&&mouseY<=363&&mouseX>=panelX+82&&mouseX<=panelRight-20){activeOverlay=Overlay((int(activeOverlay)+1)%11);}
       else if(mouseY>=372&&mouseY<=407&&mouseX>=panelX+20&&mouseX<=panelRight-20){if(persistenceBusy.load())return 0;const float half=(panelRight-panelX-45)/2;if(mouseX<=panelX+20+half&&MessageBoxW(window,L"Reset life and clear the Evolution Atlas history?",L"Life Engine",MB_ICONWARNING|MB_OKCANCEL)!=IDOK)return 0;resetUi(mouseX>panelX+20+half);}
-      else if(mouseY>=463&&mouseY<=570){const float buttonWidth=(aside-75)/6;const int row=(mouseY-463)/38,column=int((mouseX-(panelX+20))/(buttonWidth+5));const int tool=row*6+column;if(column>=0&&column<6&&tool>=0&&tool<10)activeTool=Tool(tool);}
-      else if(mouseY>=598&&mouseY<=627&&mouseX>=panelRight-62&&mouseX<=panelRight-20){if(persistenceBusy.load())return 0;selectUi(-1);}
+      else if(mouseY>=409&&mouseY<=431&&mouseX>=panelX+20&&mouseX<=panelRight-20){
+        submitUi([]()->life::UiCommands::Reply{
+          if(researchSuite&&researchSuite->stopsSimulation())return {};
+          simulation.executeCommand({0,0,life::CommandKind::Configure,life::NativeSimulation::MoverProducerSetting,0,!simulation.moverProducersEnabled()});
+          ++presentationContext;
+          return {};
+        });
+      }
+      else if(mouseY>=490&&mouseY<=597){const float buttonWidth=(panelRight-panelX-60)/5;const int row=(mouseY-490)/38,column=int((mouseX-(panelX+20))/(buttonWidth+5));const int tool=row*5+column;if(mouseX>=panelX+20&&column>=0&&column<5&&tool>=0&&tool<10)activeTool=Tool(tool);}
+      else if(client.bottom>=710&&mouseY>=646&&mouseY<=669&&mouseX>=panelRight-62&&mouseX<=panelRight-20){if(persistenceBusy.load())return 0;selectUi(-1);}
       InvalidateRect(window,nullptr,FALSE);return 0;
     }
     if(mouseY>=82&&mouseX<contentRight){if(message==WM_MBUTTONDOWN||activeTool==Tool::Pan){followCamera.release();dragging=true;dragOrigin={mouseX,mouseY};dragCameraX=cameraX;dragCameraY=cameraY;SetCapture(window);}else applyTool(mouseX,mouseY);InvalidateRect(window,nullptr,FALSE);}return 0;
   }
   if(message==WM_MOUSEMOVE&&draggingTps){const auto bounds=viewportBounds(window);const float right=bounds.right-35,left=bounds.right-std::min(390.f,bounds.right*.32f)+35;setRequestedTps(1+int((GET_X_LPARAM(lParam)-left)*119/std::max(1.f,right-left)));InvalidateRect(window,nullptr,FALSE);return 0;}
-  if(message==WM_MOUSEMOVE)senseHover={GET_X_LPARAM(lParam),GET_Y_LPARAM(lParam)};
   if (message == WM_MOUSEMOVE && dragging) {
     cameraX = dragCameraX + GET_X_LPARAM(lParam) - dragOrigin.x;
     cameraY = dragCameraY + GET_Y_LPARAM(lParam) - dragOrigin.y;
     InvalidateRect(window, nullptr, FALSE); return 0;
   }
-  if(message==WM_MOUSEMOVE&&(wParam&MK_LBUTTON)&&!researchOpen&&!dragging&&activeTool!=Tool::Inspect&&activeTool!=Tool::Pan){applyTool(GET_X_LPARAM(lParam),GET_Y_LPARAM(lParam));InvalidateRect(window,nullptr,FALSE);return 0;}
-  if (message == WM_LBUTTONUP || message == WM_MBUTTONUP) { dragging = false;draggingTps=false; ReleaseCapture(); return 0; }
+  if(message==WM_MOUSEMOVE&&(wParam&MK_LBUTTON)&&!researchOpen&&!helpOpen&&!atlasOpen&&!dragging&&activeTool!=Tool::Inspect&&activeTool!=Tool::Pan){applyTool(GET_X_LPARAM(lParam),GET_Y_LPARAM(lParam));InvalidateRect(window,nullptr,FALSE);return 0;}
+  if (message == WM_LBUTTONUP || message == WM_MBUTTONUP) { uiPointerDown=false;dragging = false;draggingTps=false; ReleaseCapture(); return 0; }
   if (message == WM_MOUSEWHEEL) {
     POINT cursor{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)}; ScreenToClient(window, &cursor);
-    RECT client{};GetClientRect(window,&client);const float aside=std::min(390.0f,client.right*.32f),contentRight=client.right-aside;if(researchOpen&&cursor.x<contentRight){researchScroll=std::max(0,researchScroll+(GET_WHEEL_DELTA_WPARAM(wParam)>0?-3:3));InvalidateRect(window,nullptr,FALSE);return 0;}if(atlasOpen&&cursor.x<contentRight){atlasTimelineWindow=std::clamp(atlasTimelineWindow+(GET_WHEEL_DELTA_WPARAM(wParam)>0?-120:120),120,24000);InvalidateRect(window,nullptr,FALSE);return 0;}
+    RECT client{};GetClientRect(window,&client);const float aside=std::min(390.0f,client.right*.32f),contentRight=client.right-aside;if(helpOpen&&cursor.x<contentRight)return 0;if(researchOpen&&cursor.x<contentRight){researchScroll=std::max(0,researchScroll+(GET_WHEEL_DELTA_WPARAM(wParam)>0?-3:3));InvalidateRect(window,nullptr,FALSE);return 0;}if(atlasOpen&&cursor.x<contentRight){atlasTimelineWindow=std::clamp(atlasTimelineWindow+(GET_WHEEL_DELTA_WPARAM(wParam)>0?-120:120),120,24000);InvalidateRect(window,nullptr,FALSE);return 0;}
     const float previous = zoom; zoom = std::clamp(zoom * (GET_WHEEL_DELTA_WPARAM(wParam) > 0 ? 1.2f : 1.0f / 1.2f), .2f, 12.0f);
     cameraX = cursor.x - (cursor.x - cameraX) * zoom / previous;
     cameraY = cursor.y-82 - (cursor.y-82-cameraY) * zoom / previous;
@@ -437,7 +581,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR commandLine, int show)
   catch (...) {if(headlessMode)return 3;life::logMessage("Skia initialization failed with an unknown error");MessageBoxW(nullptr,L"The embedded Skia renderer could not be loaded. See the local diagnostic log for details.",life::AppDisplayName,MB_ICONERROR);return 1;}
   if(arguments.find(L"--self-test")!=std::wstring::npos){try{life::NativeSimulation smoke(96,60,.2,500,53,17);for(int tick=0;tick<120;++tick)smoke.step();const auto metrics=smoke.metrics();if(metrics.ticks!=120||metrics.organisms<1||!api)throw std::runtime_error("simulation invariant failed");const auto report=libraryPath().parent_path()/"self-test.txt";std::ofstream output(report);output<<"LFE-NNUE v"<<life::AppVersion<<" self-test PASS\n"<<"ticks="<<metrics.ticks<<" organisms="<<metrics.organisms<<"\n";life::logMessage("self-test passed");api.reset();return 0;}catch(const std::exception& error){life::logMessage(std::string("self-test failed: ")+error.what());api.reset();return 2;}}
   fontManager=api->fontManagerCreateDefault();auto normal=api->fontStyleNew(400,5,0),bold=api->fontStyleNew(700,5,0);regularTypeface=api->fontManagerCreateTypeface(fontManager,"Arial",normal);boldTypeface=api->fontManagerCreateTypeface(fontManager,"Arial",bold);api->fontStyleDelete(normal);api->fontStyleDelete(bold);
-  if(headlessMode){renderWorkers=std::make_unique<RenderWorkers>();timeBeginPeriod(1);const int result=runHeadlessScript(headlessScriptPath(arguments));timeEndPeriod(1);researchSuite.reset();renderWorkers.reset();releaseTextCache();if(regularTypeface)api->typefaceUnref(regularTypeface);if(boldTypeface)api->typefaceUnref(boldTypeface);if(fontManager)api->fontManagerUnref(fontManager);api.reset();return result;}
+  if(headlessMode){renderWorkers=std::make_unique<RenderWorkers>();timeBeginPeriod(1);const int result=runHeadlessScript(headlessScriptPath(arguments));timeEndPeriod(1);researchSuite.reset();renderWorkers.reset();releaseFrameCanvas();releaseTextCache();if(regularTypeface)api->typefaceUnref(regularTypeface);if(boldTypeface)api->typefaceUnref(boldTypeface);if(fontManager)api->fontManagerUnref(fontManager);api.reset();return result;}
   WNDCLASSW type{}; type.lpfnWndProc = procedure; type.hInstance = instance;
   type.lpszClassName = L"LifeEngineSkiaPreview"; type.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));
   RegisterClassW(&type);
@@ -457,5 +601,5 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR commandLine, int show)
   SetTimer(window, 1, 50, nullptr);
   MSG message{}; while (GetMessageW(&message, nullptr, 0, 0) > 0) { TranslateMessage(&message); DispatchMessageW(&message); }
   simulationThread.request_stop();uiCommands.submit([]()->life::UiCommands::Reply{return {};});presentationThread.request_stop();simulationThread.join();presentationThread.join();presentationEnabled=false;researchSuite.reset();renderWorkers.reset();timeEndPeriod(1);
-  releaseTextCache();if(regularTypeface)api->typefaceUnref(regularTypeface);if(boldTypeface)api->typefaceUnref(boldTypeface);if(fontManager)api->fontManagerUnref(fontManager);api.reset(); return int(message.wParam);
+  releaseFrameCanvas();releaseTextCache();if(regularTypeface)api->typefaceUnref(regularTypeface);if(boldTypeface)api->typefaceUnref(boldTypeface);if(fontManager)api->fontManagerUnref(fontManager);api.reset(); return int(message.wParam);
 }

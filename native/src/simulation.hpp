@@ -80,6 +80,7 @@ struct NativeMetrics {
   int plantEaters{},scavengers{},mineralEaters{},decomposers{},predators{},nnueEvaluations{};
   int respiratoryDeaths{},criticalRespiratory{};
   size_t memoryEstimate{};int awakeRegions{},sleepingRegions{},dirtyTiles{};
+  bool moverProducersEnabled{};
 };
 struct TickWork { double organisms{},environment{},lineage{},atlas{},physiology{},reproduction{},feeding{},neural{}; };
 
@@ -94,6 +95,7 @@ class NativeSimulation {
   int width_, height_; uint32_t worldSeed_; Mulberry32 random_; int nextId_{1}, ticks_{}, resets_{}, record_{}, largest_{}, selectedId_{-1}, deadCount_{};uint64_t nextBrainGenomeId_{1};
   double foodChance_; int lifespan_, lineageLimit_, nnueEvaluations_{}; std::vector<Organism> organisms_;
   double atmosphericOxygen_{.21},carbonDioxide_{.0004};
+  bool moverProducersEnabled_{};
   bool researchRules_{true}; // Friend-only legacy regression control; normal worlds always enable research biology.
   bool reproductionEnabled_{true}, mortalityEnabled_{true}; int populationTarget_{};
   int births_{};
@@ -222,6 +224,8 @@ class NativeSimulation {
 public:
   int width()const{return width_;}int height()const{return height_;}
   size_t freezeBytes()const;
+  static constexpr int MoverProducerSetting=2;
+  bool moverProducersEnabled() const { return moverProducersEnabled_; }
   void executeCommand(SimulationCommand command){command.tick=ticks_;command.sequence=commandSequence_+1;applyCommand(command);}
   std::shared_ptr<NativeSimulation> freeze(size_t budget=128u*1024u*1024u)const;
   uint64_t stateDigest()const;

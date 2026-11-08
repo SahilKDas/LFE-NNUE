@@ -22,7 +22,11 @@ public:
   Surface (__cdecl *surfaceNewRasterDirect)(const ImageInfo*, void*, size_t, void*, void*, void*);
   Canvas (__cdecl *surfaceGetCanvas)(Surface);
   void (__cdecl *surfaceUnref)(Surface);
+  int (__cdecl *canvasSave)(Canvas);
+  void (__cdecl *canvasRestore)(Canvas);
+  void (__cdecl *canvasClipRect)(Canvas,const Rect*,int,bool);
   void (__cdecl *canvasClear)(Canvas, uint32_t);
+  void (__cdecl *canvasDrawLine)(Canvas,float,float,float,float,Paint);
   void (__cdecl *canvasDrawRect)(Canvas, const Rect*, Paint);
   Paint (__cdecl *paintNew)();
   void (__cdecl *paintDelete)(Paint);
@@ -50,7 +54,11 @@ public:
     surfaceNewRasterDirect = symbol<decltype(surfaceNewRasterDirect)>("sk_surface_new_raster_direct");
     surfaceGetCanvas = symbol<decltype(surfaceGetCanvas)>("sk_surface_get_canvas");
     surfaceUnref = symbol<decltype(surfaceUnref)>("sk_surface_unref");
+    canvasSave = symbol<decltype(canvasSave)>("sk_canvas_save");
+    canvasRestore = symbol<decltype(canvasRestore)>("sk_canvas_restore");
+    canvasClipRect = symbol<decltype(canvasClipRect)>("sk_canvas_clip_rect_with_operation");
     canvasClear = symbol<decltype(canvasClear)>("sk_canvas_clear");
+    canvasDrawLine = symbol<decltype(canvasDrawLine)>("sk_canvas_draw_line");
     canvasDrawRect = symbol<decltype(canvasDrawRect)>("sk_canvas_draw_rect");
     paintNew = symbol<decltype(paintNew)>("sk_paint_new");
     paintDelete = symbol<decltype(paintDelete)>("sk_paint_delete");

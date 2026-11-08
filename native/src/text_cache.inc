@@ -26,3 +26,15 @@ void text(life::skia::Api::Canvas canvas,life::skia::Api::Paint paint,const std:
   }
   if(blob){api->paintSetColor(paint,color);api->paintSetAntialias(paint,true);api->canvasDrawTextBlob(canvas,blob,x,y,paint);if(temporary)api->textBlobUnref(blob);}
 }
+
+// Constrain labels to the space assigned by their panel or button.
+void boundedText(life::skia::Api::Canvas canvas,life::skia::Api::Paint paint,
+                 const std::string& value,float x,float y,float size,uint32_t color,
+                 float right,bool bold=false){
+  if(right<=x||value.empty())return;
+  const life::skia::Rect bounds{x,y-size-2,right,y+size*.4f};
+  api->canvasSave(canvas);
+  api->canvasClipRect(canvas,&bounds,1,false);
+  text(canvas,paint,value,x,y,size,color,bold);
+  api->canvasRestore(canvas);
+}
