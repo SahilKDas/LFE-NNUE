@@ -1,3 +1,17 @@
+# LFE-NNUE v1.1.0
+
+The native Windows simulator now lets you follow a lineage, save entire worlds, and rewind or branch a run to compare outcomes.
+
+- **Follow and inspect.** Follow individual creatures across looping borders, highlight their families, and inspect bounded histories of sensory inputs and neural decisions. After a creature dies, follow a surviving descendant. Zoomed-out views show one copy of the world.
+- **Save worlds and revisit them.** Version 3 archives retain simulation state, camera preferences, ecology, and neural runtime state. Genuine v1 and v2 archives remain readable. Older networks gain zero-filled input rows for the new senses.
+- **Evolution Research Suite.** Press **R** for automatic checkpoints, cancellable rewind, branches, paired experiments, genome comparison, a searchable ecological journal, and a library of worlds and creature specimens. Automatic history uses an estimated 128 MiB capture limit and a 2 GiB disk budget. The active rewind index is session-local. Retained branch heads can be reopened from the Library.
+- **New biology.** Creatures can evolve egg-laying, juvenile development, two anonymous chemical signals, and resistance to local disease. New overlays show signals, development, and infection. The Simulation panel has a saved, default-off option that lets Producer Cells on movers generate plant matter.
+- **Help and presentation.** Press **F1** for the quick start guide, controls, ecosystem overview, and cell color legend. Labels and panels have dedicated space. Buttons animate on hover and press, menu tabs fade in, and the Atlas timeline animates on entry and during scroll zoom.
+- **Performance and tooling.** The renderer uses layered frame exchange, cached text, and reused drawing surfaces. Full-page views skip covered world drawing, and dense charts bucket data to screen width. Headless tools exercise the regular game and UI. Timed validation checks battery state. The latest documented 10,000-creature research run averaged 60 TPS and 60 FPS but missed the strict distinct-tick smoothness target.
+- **Native build cleanup.** The TypeScript browser app, Node tooling, WebView and Nim backends were removed. The experimental 2.5D habitats, weather, and drainage were retired in favor of the flat native world. Old depth saves load into the flat simulation. The README now covers controls, ecology, research, and native development.
+
+---
+
 # LFE-NNUE v1.0.0
 
 LFE-NNUE v1.0.0 is the first production release of the native Windows evolution simulator. It preserves deterministic seeded ecology and NNUE-only movement while bringing the complete simulation, renderer, Evolution Observatory, and Evolution Atlas into native C++/Skia.
